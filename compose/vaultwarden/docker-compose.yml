@@ -1,0 +1,12 @@
+name: vaultwarden
+services:
+  vaultwarden:
+    container_name: vaultwarden
+    image: ghcr.io/dani-garcia/vaultwarden:latest
+    volumes:
+      - /var/lib/cloudunit/vaultwarden/data:/data
+    ports:
+      - "8222:80"
+    environment:
+      SIGNUPS_ALLOWED: "true"
+    restart: always

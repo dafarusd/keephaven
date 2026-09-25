@@ -1,0 +1,71 @@
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ${IMMICH_SERVER_IMAGE}
+    pull_policy: never
+    volumes:
+      - ${UPLOAD_LOCATION}:/usr/src/app/upload
+      # Samba "Photos" drop-in share -> Immich External Library. Hardcoded absolute
+      # host path (NOT a ${VAR}) on purpose: already-provisioned boxes have a .env
+      # generated before this feature existed, so a new env var would substitute
+      # EMPTY on an OTA update and silently break the mount. Read-only: Immich reads
+      # and imports the owner's files but never modifies or deletes them; the owner
+      # manages these files through the share. Path is OUTSIDE the managed
+      # ${UPLOAD_LOCATION}/library dir (it is a sibling: immich/external).
+      - /var/lib/cloudunit/immich/external:/usr/src/app/external:ro
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    ports:
+      - "2283:2283"
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ${IMMICH_MACHINE_LEARNING_IMAGE}
+    pull_policy: never
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - .env
+    restart: always
+    # The image's BUILT-IN healthcheck exits 1 with empty output on our platform
+    # even though the service runs fine (gunicorn listening :3003) — a long-standing
+    # cosmetic "unhealthy" state (DEVLOG 676-678). Nothing in our stack consumes ML
+    # container health: the Photos dashboard tile probes immich-server :2283
+    # /api/server/ping, and immich-server depends_on only redis+database (no
+    # service_healthy condition). Disable the broken probe so the container never
+    # reports a false unhealthy.
+    healthcheck:
+      disable: true
+
+  redis:
+    container_name: immich_redis
+    image: ${VALKEY_IMAGE}
+    pull_policy: never
+    healthcheck:
+      test: redis-cli ping || exit 1
+    restart: always
+
+  database:
+    container_name: immich_postgres
+    image: ${IMMICH_POSTGRES_IMAGE}
+    pull_policy: never
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  model-cache:

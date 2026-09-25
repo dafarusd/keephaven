@@ -1,0 +1,14 @@
+name: freshrss
+services:
+  freshrss:
+    container_name: freshrss
+    image: ${FRESHRSS_IMAGE}
+    pull_policy: never
+    ports:
+      - "8081:80"
+    volumes:
+      - /var/lib/cloudunit/freshrss/data:/var/www/FreshRSS/data
+      - /var/lib/cloudunit/freshrss/extensions:/var/www/FreshRSS/extensions
+    environment:
+      TZ: "America/New_York"
+    restart: always

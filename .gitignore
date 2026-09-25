@@ -1,0 +1,16 @@
+# Nix build outputs
+result
+result-*
+
+# Build artifacts
+*.img
+*.img.zst
+
+# Your own dev SSH key (force-add it locally if you build the dev image)
+keys/dev-admin.pub
+
+# Secrets never belong here
+*.key
+*.sec
+*.pem
+.env

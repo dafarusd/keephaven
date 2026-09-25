@@ -1,0 +1,22 @@
+name: kavita
+services:
+  kavita:
+    container_name: kavita
+    image: ${KAVITA_IMAGE}
+    pull_policy: never
+    ports:
+      - "5001:5000"
+    volumes:
+      - /var/lib/cloudunit/kavita/media:/manga
+      - /var/lib/cloudunit/kavita/config:/kavita/config
+    # Offline-appliance safety net (scoped to this container only). Kavita's
+    # first-run MigrateEmailTemplates does a synchronous GET to GitHub for email
+    # templates; on the setup AP (no upstream internet) that hangs to full
+    # timeout, stacking to minutes of "spinner" at startup. Blackhole the host so
+    # the download fails fast (connection refused on localhost:443 in ms) instead
+    # of hanging. Normal path: the pre-seed step (services.nix) installs the
+    # templates so the migration skips the download entirely; this is the backstop
+    # if a future Kavita version phones a new host or the seed ever misses.
+    extra_hosts:
+      - "raw.githubusercontent.com:127.0.0.1"
+    restart: always

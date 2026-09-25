@@ -1,0 +1,13 @@
+name: audiobookshelf
+services:
+  audiobookshelf:
+    container_name: audiobookshelf
+    image: ${AUDIOBOOKSHELF_IMAGE}
+    pull_policy: never
+    ports:
+      - "13378:80"
+    volumes:
+      - /var/lib/cloudunit/audiobookshelf/media:/audiobooks
+      - /var/lib/cloudunit/audiobookshelf/config:/config
+      - /var/lib/cloudunit/audiobookshelf/metadata:/metadata
+    restart: always

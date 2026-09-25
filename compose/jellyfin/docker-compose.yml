@@ -1,0 +1,13 @@
+name: jellyfin
+services:
+  jellyfin:
+    container_name: jellyfin
+    image: ${JELLYFIN_IMAGE}
+    pull_policy: never
+    volumes:
+      - /var/lib/cloudunit/jellyfin/config:/config
+      - /var/lib/cloudunit/jellyfin/cache:/cache
+      - /var/lib/cloudunit/jellyfin/media:/media
+    ports:
+      - "8096:8096"
+    restart: always
