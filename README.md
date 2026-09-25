@@ -142,3 +142,14 @@ If you'd rather not get updates from here, build with your own `keephaven.update
 AGPL-3.0 — see `LICENSE`. Copyright (c) 2026 Dafarus.
 
 The apps inside the image keep their own licenses: Immich AGPL-3.0, Jellyfin GPL-2.0, Navidrome GPL-3.0, Audiobookshelf GPL-3.0, Kavita GPL-3.0, FreshRSS AGPL-3.0. Their source is at the links in the table above.
+
+---
+
+Built by Dafarus — local-first software and hardware you own.
+
+Follow the work on X: [@Dafarusd](https://x.com/Dafarusd)
+
+My company:
+- Keephaven — [keephaven.co](https://keephaven.co) · [X](https://x.com/Keephaven) · [Facebook](https://www.facebook.com/profile.php?id=61592155452190)
+
+More work: [gate](https://github.com/dafarusd/gate) · [Sentinel](https://github.com/dafarusd/sentinel-public) · [Agent Ultra](https://github.com/dafarusd/Ultra-Agent-Release) · [EveryVoice](https://github.com/dafarusd/everyvoice) · [Mind Meld](https://github.com/dafarusd/mindmeld) · [monero-swap](https://github.com/dafarusd/monero-swap)
