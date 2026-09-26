@@ -150,6 +150,11 @@ Built by Dafarus — local-first software and hardware you own.
 Follow the work on X: [@Dafarusd](https://x.com/Dafarusd)
 
 My company:
-- Keephaven — [keephaven.co](https://keephaven.co) · [X](https://x.com/Keephaven) · [Facebook](https://www.facebook.com/profile.php?id=61592155452190)
+- Keephaven — [keephaven.co](https://keephaven.co) · [source](https://github.com/dafarusd/keephaven) · [X](https://x.com/Keephaven) · [Facebook](https://www.facebook.com/profile.php?id=61592155452190)
 
 More work: [gate](https://github.com/dafarusd/gate) · [Sentinel](https://github.com/dafarusd/sentinel-public) · [Agent Ultra](https://github.com/dafarusd/Ultra-Agent-Release) · [EveryVoice](https://github.com/dafarusd/everyvoice) · [Mind Meld](https://github.com/dafarusd/mindmeld) · [monero-swap](https://github.com/dafarusd/monero-swap)
+
+Donations help keep it going:
+- BTC `bc1qpyeupsjkrny259upq9jrg7d22h32ncrlknj3vw`
+- ETH `0x8ec99D65C23D39772Cc2425cfd1F7a3872af8636`
+- XMR `428vC4FYUs7Dm2aAAN2i2zY39z4sM5RDYBAPdyCxCS4ZUJ36KENQaP5AdjYpytvtkXZ15sB8ooAGGR1GehJjo5GUSPnHVAV`
