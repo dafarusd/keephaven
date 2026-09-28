@@ -1,0 +1,28 @@
+Keephaven
+Copyright (c) 2026 Keephaven LLC.
+
+LICENSE
+
+Keephaven's own code is licensed under the GNU Affero General Public
+License, version 3 only (AGPL-3.0-only). See LICENSE for the full text.
+
+COMMERCIAL LICENSING
+
+Keephaven LLC holds the copyright in Keephaven's own code and can license
+it under separate commercial terms, for example for OEM integration,
+white-label distribution, or products that can't meet the AGPL's
+conditions. Contact: support@keephaven.co
+
+A commercial license covers only Keephaven's own code. The apps and the
+operating system inside the image keep their own licenses (see
+THIRD-PARTY.md). The files in compose/ follow each app's published
+examples, so they are not part of a commercial license either.
+
+TRADEMARKS
+
+Keephaven(TM) and the Keephaven logo are trademarks of Keephaven LLC.
+Neither the AGPL nor a commercial license grants any right to use them.
+
+CONTRIBUTIONS
+
+See CONTRIBUTING.md.

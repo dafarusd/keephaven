@@ -1,0 +1,14 @@
+# Copyright and license for files that can't carry a header comment.
+# The .nix files carry their own SPDX headers. Scripts and compose files
+# are copied byte for byte into the image, so a header would change it.
+version = 1
+
+[[annotations]]
+path = ["modules/*.sh", "keys/**", "flake.lock", "*.md", "NOTICE", ".gitignore", ".github/**", "REUSE.toml"]
+SPDX-FileCopyrightText = "2026 Keephaven LLC"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = "compose/**"
+SPDX-FileCopyrightText = ["2026 Keephaven LLC", "The authors of each upstream project whose published compose example the file follows"]
+SPDX-License-Identifier = "AGPL-3.0-only"

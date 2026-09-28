@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Keephaven LLC
+# SPDX-License-Identifier: AGPL-3.0-only
 {
   description = "cloud-image: self-hosted private cloud appliance for Raspberry Pi 5";
 

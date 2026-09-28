@@ -139,7 +139,9 @@ If you'd rather not get updates from here, build with your own `keephaven.update
 
 ## License
 
-AGPL-3.0 — see `LICENSE`. Copyright (c) 2026 Dafarus.
+AGPL-3.0 — see `LICENSE`. Copyright (c) 2026 Keephaven LLC. Commercial licenses for Keephaven's own code are available from Keephaven LLC; see `NOTICE`.
+
+Keephaven™ and the Keephaven logo are trademarks of Keephaven LLC. The license covers the code, not the name or the logo.
 
 The apps inside the image keep their own licenses: Immich AGPL-3.0, Jellyfin GPL-2.0, Navidrome GPL-3.0, Audiobookshelf GPL-3.0, Kavita GPL-3.0, FreshRSS AGPL-3.0. Their source is at the links in the table above.
 
