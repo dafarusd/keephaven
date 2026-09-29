@@ -47,7 +47,7 @@ sha256sum keephaven-2026.08.19.img.zst
 
 - A Raspberry Pi 5. Tested on the 8 GB model.
 - An NVMe SSD on a Pi 5 NVMe case or HAT. Tested with a Samsung 990 PRO 1 TB. The system takes the first 35.4 GB and your files get the rest.
-- A Linux computer to flash the SSD and read the setup password (see First boot).
+- A computer to write the image to the SSD, and a microSD card with Raspberry Pi OS to read the setup password once (see First boot).
 
 Some NVMe cases need `PCIE_PROBE=1` in the Pi's EEPROM config before the Pi sees the drive. That's a Pi firmware setting, not part of this image.
 
@@ -74,16 +74,17 @@ sync
 
 1. Put the SSD in the Pi and plug in power. Ethernet is optional.
 2. Within about 3 minutes a Wi-Fi network named `Keephaven-` plus five characters shows up. The box made that name, and a random password, on this first boot.
-3. Sold boxes carry that password on a sticker. On a box you flashed yourself, read it off the SSD. Unplug the Pi at the wall, move the SSD to your Linux computer, and run:
+3. Sold boxes carry that password on a sticker. On a box you flashed yourself, read it off the drive once. The easiest way uses the Pi itself: unplug it at the wall, put in a microSD card with Raspberry Pi OS, leave the SSD connected, and power on. It boots Pi OS from the card. Then run:
 
    ```
    sudo mkdir -p /mnt/keephaven
    sudo mount -o ro /dev/disk/by-label/cloudunit-data /mnt/keephaven
    sudo cat /mnt/keephaven/unit.env
-   sudo umount /mnt/keephaven
    ```
 
-   You'll see three lines. `UNIT_PASSWORD` is your password. Put the SSD back in the Pi and power it on.
+   You'll see three lines. `UNIT_PASSWORD` is your password. Power off, take the card out, and power on again. It boots Keephaven.
+
+   If it boots Keephaven even with the card in, your Pi is set to try the SSD first. With a USB SSD, unplug it until Pi OS has started, then plug it back in. No SD card? Move the SSD to any Linux computer and run the same three commands. Windows and macOS can't read the data partition.
 4. Join the `Keephaven-…` network with that password. The setup page opens by itself. If it doesn't, go to `http://192.168.50.1`.
 5. Finish setup. The dashboard links all six apps. Username `keephaven`, same password. Photos (Immich) signs in with `keephaven@local` instead of a username.
 
@@ -133,7 +134,7 @@ If you'd rather not get updates from here, build with your own `keephaven.update
 ## Limits
 
 - Tested on a Pi 5 8 GB booting from NVMe only. SD card boot and the 4 GB Pi haven't been tested.
-- Reading the setup password needs a Linux computer and pulling the SSD once.
+- Reading the setup password takes one extra boot from a Raspberry Pi OS SD card, or a Linux computer.
 - Code comments point at a build log and decision notes that aren't in this repo.
 - `compose/vaultwarden` is here but not switched on.
 
