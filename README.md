@@ -33,6 +33,8 @@ The app images are pinned by digest and baked into the image. Nothing gets pulle
 
 Current release: **2026.08.19** — the same version the update server hands out to every box.
 
+Step-by-step setup lives on the site: https://keephaven.co/download#setup
+
 - File: [`keephaven-2026.08.19.img.zst`](https://updates.keephaven.co/download/keephaven-2026.08.19.img.zst)
 - Size: 6,266,477,542 bytes compressed, 35,445,014,528 bytes unpacked
 - SHA-256: `1c2134b55e729a87fbc270d60c9d18b73d93997361f57f548c30bb84dbc9ddd7`
