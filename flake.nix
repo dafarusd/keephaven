@@ -51,6 +51,7 @@
         ./modules/settings.nix
         ./modules/captive.nix
         ./modules/credentials.nix
+        ./modules/setup-screen.nix
         ./modules/provision.nix
         ./modules/finalize.nix
         ./modules/update.nix
