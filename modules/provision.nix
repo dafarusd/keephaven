@@ -507,12 +507,20 @@ let
   '';
 in
 {
+  # Edition switch (modules/editions.nix): the five media provisioners run only
+  # when the edition includes them. Immich's provisioner and its external-library
+  # scan are always present. For entertainment all are active, so this is identical.
   systemd.services =
-    (mkProvision { name = "jellyfin"; after = [ "cloudunit-jellyfin.service" ]; script = jellyfinProvision; })
-    // (mkProvision { name = "navidrome"; after = [ "cloudunit-navidrome.service" ]; script = navidromeProvision; })
-    // (mkProvision { name = "freshrss"; after = [ "cloudunit-freshrss.service" ]; script = freshrssProvision; })
-    // (mkProvision { name = "kavita"; after = [ "cloudunit-kavita.service" ]; script = kavitaProvision; })
-    // (mkProvision { name = "audiobookshelf"; after = [ "cloudunit-audiobookshelf.service" ]; script = audiobookshelfProvision; })
+    lib.optionalAttrs (builtins.elem "jellyfin" config.keephaven.activeApps)
+      (mkProvision { name = "jellyfin"; after = [ "cloudunit-jellyfin.service" ]; script = jellyfinProvision; })
+    // lib.optionalAttrs (builtins.elem "navidrome" config.keephaven.activeApps)
+      (mkProvision { name = "navidrome"; after = [ "cloudunit-navidrome.service" ]; script = navidromeProvision; })
+    // lib.optionalAttrs (builtins.elem "freshrss" config.keephaven.activeApps)
+      (mkProvision { name = "freshrss"; after = [ "cloudunit-freshrss.service" ]; script = freshrssProvision; })
+    // lib.optionalAttrs (builtins.elem "kavita" config.keephaven.activeApps)
+      (mkProvision { name = "kavita"; after = [ "cloudunit-kavita.service" ]; script = kavitaProvision; })
+    // lib.optionalAttrs (builtins.elem "audiobookshelf" config.keephaven.activeApps)
+      (mkProvision { name = "audiobookshelf"; after = [ "cloudunit-audiobookshelf.service" ]; script = audiobookshelfProvision; })
     // (mkProvision { name = "immich"; after = [ "cloudunit-immich.service" ]; script = immichProvision; })
     // {
       cloudunit-immich-scan = {

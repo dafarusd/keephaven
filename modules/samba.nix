@@ -5,18 +5,21 @@ let
   dataDir = "/var/lib/cloudunit";
   sambaUser = "keephaven";
 
-  shares = [
-    { name = "Movies";     dir = "jellyfin/media"; }
-    { name = "Music";      dir = "navidrome/media"; }
-    { name = "Audiobooks"; dir = "audiobookshelf/media"; }
-    { name = "Books";      dir = "kavita/media"; }
+  # Edition switch (modules/editions.nix): a share only when its app is in the
+  # edition. The order is preserved (Photos stays LAST), so for entertainment the
+  # rendered smb.conf is identical. A Photos box keeps only the Photos share.
+  shares = builtins.filter (s: builtins.elem s.app config.keephaven.activeApps) [
+    { name = "Movies";     dir = "jellyfin/media";       app = "jellyfin"; }
+    { name = "Music";      dir = "navidrome/media";      app = "navidrome"; }
+    { name = "Audiobooks"; dir = "audiobookshelf/media"; app = "audiobookshelf"; }
+    { name = "Books";      dir = "kavita/media";         app = "kavita"; }
     # "Photos" drop-in -> Immich External Library. dir is a SIBLING of Immich's
     # managed library (immich/library), never inside it. The share definition +
     # creds come from here; the authoritative dir-creation (owned by keephaven,
     # before immich mounts it, on every boot incl. OTA) is cloudunit-immich-external
     # in services.nix — because samba-bootstrap's mkShareDirs only runs on first
     # boot and would be skipped on already-provisioned (OTA'd) boxes.
-    { name = "Photos";     dir = "immich/external"; }
+    { name = "Photos";     dir = "immich/external";      app = "immich"; }
   ];
 
   shareSettings = lib.listToAttrs (map (s: {

@@ -6,6 +6,28 @@ let
   photosStatusBin = config.cloudunit.wrappers.photosSigninStatus;
   dataDir = "/var/lib/cloudunit";
   setupFlag = "${dataDir}/.setup-complete";
+  # The tiles, as data, so the edition switch can drop the ones an edition does
+  # not include (modules/editions.nix). Order and formatting reproduce the former
+  # hard-coded JS exactly, so for entertainment (all six active) the rendered page
+  # is byte-identical. A Photos box shows only the Photos tile.
+  tilesMeta = [
+    { name = "Photos"; desc = "Immich"; port = 2283; health = "/api/server/ping"; slow = true; key = "immich"; }
+    { name = "Movies"; desc = "Jellyfin"; port = 8096; health = "/System/Info/Public"; key = "jellyfin"; }
+    { name = "Music"; desc = "Navidrome"; port = 4533; health = "/ping"; key = "navidrome"; }
+    { name = "Audiobooks"; desc = "AudioBookshelf"; port = 13378; health = "/healthcheck"; key = "audiobookshelf"; }
+    { name = "Books"; desc = "Kavita"; port = 5001; health = "/api/health"; key = "kavita"; }
+    { name = "News"; desc = "FreshRSS"; port = 8081; health = "/"; key = "freshrss"; }
+  ];
+  renderTile = t:
+    ''{ name: "${t.name}", desc: "${t.desc}", port: ${toString t.port}, health: "${t.health}", ''
+    + lib.optionalString (t.slow or false) "slow: true, "
+    + ''key: "${t.key}" }'';
+  # 6-space indent to match this file after Nix's '' strips its common leading
+  # indent (the separator's spaces are a literal interpolated value, so they are
+  # NOT stripped — they must equal the post-strip indent of the surrounding JS).
+  tilesJs = lib.concatMapStringsSep ",\n      " renderTile
+    (builtins.filter (t: builtins.elem t.key config.keephaven.activeApps) tilesMeta);
+
   # Post-setup dashboard. Serves a tile page on LAN port 80. Tiles start
   # disabled with a spinner and only become clickable once each service's
   # health check passes, so the user can never click into a half-started
@@ -114,12 +136,7 @@ let
       <script>
         var host = window.location.hostname;
         var services = [
-          { name: "Photos", desc: "Immich", port: 2283, health: "/api/server/ping", slow: true, key: "immich" },
-          { name: "Movies", desc: "Jellyfin", port: 8096, health: "/System/Info/Public", key: "jellyfin" },
-          { name: "Music", desc: "Navidrome", port: 4533, health: "/ping", key: "navidrome" },
-          { name: "Audiobooks", desc: "AudioBookshelf", port: 13378, health: "/healthcheck", key: "audiobookshelf" },
-          { name: "Books", desc: "Kavita", port: 5001, health: "/api/health", key: "kavita" },
-          { name: "News", desc: "FreshRSS", port: 8081, health: "/", key: "freshrss" }
+          ${tilesJs}
         ];
         var total = services.length;
         var readyCount = 0;

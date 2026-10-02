@@ -102,30 +102,43 @@ let
     };
 in
 {
-  environment.etc."cloudunit/compose/immich/docker-compose.yml".source =
-    ../compose/immich/docker-compose.yml;
-  environment.etc."cloudunit/compose/immich/.env.template".source =
-    ../compose/immich/.env.template;
-  environment.etc."cloudunit/compose/jellyfin/docker-compose.yml".source =
-    ../compose/jellyfin/docker-compose.yml;
-  environment.etc."cloudunit/compose/navidrome/docker-compose.yml".source =
-    ../compose/navidrome/docker-compose.yml;
-  environment.etc."cloudunit/compose/audiobookshelf/docker-compose.yml".source =
-    ../compose/audiobookshelf/docker-compose.yml;
-  environment.etc."cloudunit/compose/kavita/docker-compose.yml".source =
-    ../compose/kavita/docker-compose.yml;
-  environment.etc."cloudunit/compose/freshrss/docker-compose.yml".source =
-    ../compose/freshrss/docker-compose.yml;
+  # Immich is in every edition, so its compose files are unconditional. The five
+  # media apps' compose files are emitted only when the edition includes them
+  # (modules/editions.nix). For entertainment all five are active, so the merged
+  # set is identical to before.
+  environment.etc = {
+    "cloudunit/compose/immich/docker-compose.yml".source = ../compose/immich/docker-compose.yml;
+    "cloudunit/compose/immich/.env.template".source = ../compose/immich/.env.template;
+  }
+    // lib.optionalAttrs (builtins.elem "jellyfin" config.keephaven.activeApps) {
+      "cloudunit/compose/jellyfin/docker-compose.yml".source = ../compose/jellyfin/docker-compose.yml;
+    }
+    // lib.optionalAttrs (builtins.elem "navidrome" config.keephaven.activeApps) {
+      "cloudunit/compose/navidrome/docker-compose.yml".source = ../compose/navidrome/docker-compose.yml;
+    }
+    // lib.optionalAttrs (builtins.elem "audiobookshelf" config.keephaven.activeApps) {
+      "cloudunit/compose/audiobookshelf/docker-compose.yml".source = ../compose/audiobookshelf/docker-compose.yml;
+    }
+    // lib.optionalAttrs (builtins.elem "kavita" config.keephaven.activeApps) {
+      "cloudunit/compose/kavita/docker-compose.yml".source = ../compose/kavita/docker-compose.yml;
+    }
+    // lib.optionalAttrs (builtins.elem "freshrss" config.keephaven.activeApps) {
+      "cloudunit/compose/freshrss/docker-compose.yml".source = ../compose/freshrss/docker-compose.yml;
+    };
   #   environment.etc."cloudunit/compose/vaultwarden/docker-compose.yml".source =
   #     ../compose/vaultwarden/docker-compose.yml;
 
   systemd.services =
     (mkService { name = "immich"; description = "Cloud Unit - Immich photo service"; needsEnv = true; })
     // (mkBootstrap { name = "immich"; })
-    // (mkService { name = "jellyfin"; description = "Cloud Unit - Jellyfin media server"; needsEnv = false; })
-    // (mkService { name = "navidrome"; description = "Cloud Unit - Navidrome music"; needsEnv = false; })
-    // (mkService { name = "audiobookshelf"; description = "Cloud Unit - AudioBookshelf"; needsEnv = false; })
-    // (mkService { name = "kavita"; description = "Cloud Unit - Kavita books"; needsEnv = false;
+    // lib.optionalAttrs (builtins.elem "jellyfin" config.keephaven.activeApps)
+       (mkService { name = "jellyfin"; description = "Cloud Unit - Jellyfin media server"; needsEnv = false; })
+    // lib.optionalAttrs (builtins.elem "navidrome" config.keephaven.activeApps)
+       (mkService { name = "navidrome"; description = "Cloud Unit - Navidrome music"; needsEnv = false; })
+    // lib.optionalAttrs (builtins.elem "audiobookshelf" config.keephaven.activeApps)
+       (mkService { name = "audiobookshelf"; description = "Cloud Unit - AudioBookshelf"; needsEnv = false; })
+    // lib.optionalAttrs (builtins.elem "kavita" config.keephaven.activeApps)
+       (mkService { name = "kavita"; description = "Cloud Unit - Kavita books"; needsEnv = false;
          # Offline pre-seed: copy the image's OWN bundled email templates into the
          # customizable config/templates dir before Kavita starts, copy-if-absent
          # (cp -n) so existing/user-edited templates are never clobbered. Kavita's
@@ -142,7 +155,8 @@ in
              -c 'mkdir -p /kavita/config/templates && cp -n /kavita/EmailTemplates/*.html /kavita/config/templates/ 2>/dev/null || true' || true
          '';
        })
-    // (mkService { name = "freshrss"; description = "Cloud Unit - FreshRSS"; needsEnv = false; })
+    // lib.optionalAttrs (builtins.elem "freshrss" config.keephaven.activeApps)
+       (mkService { name = "freshrss"; description = "Cloud Unit - FreshRSS"; needsEnv = false; })
     // {
       # Ensure the Immich External Library drop-in dir exists and is owned by the
       # share user BEFORE the immich container bind-mounts it. If the dir is absent

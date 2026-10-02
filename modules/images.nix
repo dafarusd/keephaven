@@ -123,7 +123,12 @@ let
   # loaders have no ordering between them, so systemd runs them in parallel across
   # the idle cores; the five light services come up in seconds while Immich's
   # heavy stack finishes in the background.
-  serviceImages = {
+  # Edition switch (modules/editions.nix): keep only the active edition's apps.
+  # Dropping an app here drops BOTH its loader unit AND its baked image tarballs
+  # from the closure (the tarballs are referenced only by the loader scripts), so
+  # a Photos box bakes just Immich's images. filterAttrs preserves attr order, so
+  # for entertainment (all six active) the result is identical to before.
+  serviceImages = lib.filterAttrs (name: _: builtins.elem name config.keephaven.activeApps) {
     immich = [ "immich-server" "immich-machine-learning" "immich-postgres" "valkey" ];
     jellyfin = [ "jellyfin" ];
     navidrome = [ "navidrome" ];

@@ -39,7 +39,9 @@ let
   statusFile = "${dataDir}/update/status.json";
   replUser = "kh-replica";
 
-  services = [ "immich" "jellyfin" "navidrome" "audiobookshelf" "kavita" "freshrss" ];
+  # The edition's apps (edition switch, modules/editions.nix). For entertainment
+  # this is the same six in the same order, so the rendered unit is unchanged.
+  services = config.keephaven.activeApps;
   stopAll = lib.concatMapStringsSep "\n    "
     (s: "$SYSTEMCTL stop cloudunit-${s}.service 2>/dev/null || true") services;
   startAll = lib.concatMapStringsSep "\n    "

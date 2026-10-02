@@ -32,6 +32,7 @@
         ./modules/access-profile.nix
         ./modules/support-access.nix
         ./modules/base.nix
+        ./modules/editions.nix
         ./modules/disk-layout.nix
         ./modules/docker.nix
         ./modules/images.nix
@@ -57,21 +58,31 @@
         ./modules/update.nix
       ];
 
-      mkUnit = profile: nixos-raspberrypi.lib.nixosSystem {
+      # profile = dev/prod; edition = the app payload (modules/editions.nix).
+      # edition defaults to entertainment, so the two original outputs are unchanged.
+      mkUnit = { profile, edition ? "entertainment" }: nixos-raspberrypi.lib.nixosSystem {
         specialArgs = inputs;
-        modules = sharedModules ++ [ { keephaven.profile = profile; } ];
+        modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ];
       };
     in
     {
       # Twin systems from one source tree. dev = keyed + SSH on LAN (testing);
       # prod = keyless + SSH only over tailscale0 (ships to customers).
-      nixosConfigurations.cloudunit-dev = mkUnit "dev";
-      nixosConfigurations.cloudunit-prod = mkUnit "prod";
+      nixosConfigurations.cloudunit-dev = mkUnit { profile = "dev"; };
+      nixosConfigurations.cloudunit-prod = mkUnit { profile = "prod"; };
+
+      # Photos edition — Immich only, same shared base. Flashed fresh.
+      nixosConfigurations.cloudunit-photos-dev = mkUnit { profile = "dev"; edition = "photos"; };
+      nixosConfigurations.cloudunit-photos-prod = mkUnit { profile = "prod"; edition = "photos"; };
 
       # Complete bootable images to flash directly to the NVMe.
       packages.aarch64-linux.dev =
         self.nixosConfigurations.cloudunit-dev.config.system.build.sdImage;
       packages.aarch64-linux.prod =
         self.nixosConfigurations.cloudunit-prod.config.system.build.sdImage;
+      packages.aarch64-linux.photos-prod =
+        self.nixosConfigurations.cloudunit-photos-prod.config.system.build.sdImage;
+      packages.aarch64-linux.photos-dev =
+        self.nixosConfigurations.cloudunit-photos-dev.config.system.build.sdImage;
     };
 }

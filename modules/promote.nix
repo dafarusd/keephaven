@@ -49,10 +49,11 @@ let
 
   # Restore targets, in the order the G10 bench restore proved: files first, so
   # the database never references originals that are not on disk yet.
-  restorePaths = [
-    "immich/library" "immich/external" "jellyfin/media"
-    "navidrome/media" "audiobookshelf/media" "kavita/media"
-  ];
+  # Edition switch: the active edition's backup folders, from the appBackup
+  # authority in modules/editions.nix (keephaven.activeBackupPaths). For
+  # entertainment this is the same six in the same order, so the rendered script
+  # is unchanged. A Photos box restores only immich/library + immich/external.
+  restorePaths = config.keephaven.activeBackupPaths;
 
   # Read-only: what the confirmation screen needs to name the source box and the
   # backup's age. Kept separate from the promote wrapper so the UI can call it
@@ -333,7 +334,7 @@ let
     ${pkgs.systemd}/bin/systemctl restart --no-block cloudunit-immich.service || true
     ${lib.concatMapStringsSep "\n    " (s:
       "${pkgs.systemd}/bin/systemctl start --no-block cloudunit-${s}.service || true")
-      [ "jellyfin" "navidrome" "audiobookshelf" "kavita" "freshrss" ]}
+      (builtins.filter (s: s != "immich") config.keephaven.activeApps)}
     $co/printf 'promoted_from=%s\npromoted_at=%s\n' "''${PEER:-unknown}" \
       "$($co/date -u '+%Y-%m-%dT%H:%M:%SZ')" > ${promotedFlag}
     $co/chmod 644 ${promotedFlag}
@@ -354,7 +355,7 @@ let
     # assuming success (the generalized form of the Immich container bug).
     #
     # Health endpoints are the ones the dashboard already trusts (dashboard.nix).
-    for svc in immich jellyfin navidrome audiobookshelf kavita freshrss; do
+    for svc in ${lib.concatStringsSep " " config.keephaven.activeApps}; do
       ${pkgs.systemd}/bin/systemctl start --no-block "cloudunit-$svc-provision.service" 2>/dev/null \
         || ${pkgs.systemd}/bin/systemctl restart --no-block "cloudunit-$svc-provision.service" 2>/dev/null || true
     done
@@ -382,7 +383,7 @@ let
       C="$(${pkgs.curl}/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:$P$H" 2>/dev/null)"
       case "$C" in (2[0-9][0-9]|3[0-9][0-9]) return 0 ;; (*) return 1 ;; esac
     }
-    UNHEALTHY="immich jellyfin navidrome audiobookshelf kavita freshrss"
+    UNHEALTHY="${lib.concatStringsSep " " config.keephaven.activeApps}"
     k=0
     while [ -n "$UNHEALTHY" ] && [ "$k" -lt 48 ]; do
       STILL=""
