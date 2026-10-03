@@ -36,6 +36,17 @@ let
   dashboardApp = pkgs.writeText "cloudunit-dashboard.py" ''
     import http.server, socketserver, subprocess, json, os
     PORT = 80
+    # APP PICKER: apps the owner switched off (an <app>.off marker in APPS_DIR) are
+    # dropped from the tile list at serve time, so the page never draws, probes or
+    # counts them. If the substitution ever failed, the page falls back to every
+    # tile -- today's behaviour.
+    APPS_DIR = "${config.keephaven.appsDir}"
+    PICKABLE = ${builtins.toJSON config.keephaven.pickableApps}
+    def apps_off():
+        try:
+            return [a for a in PICKABLE if os.path.exists(os.path.join(APPS_DIR, a + ".off"))]
+        except Exception:
+            return []
     PAGE = """<!DOCTYPE html>
     <html><head><meta charset="utf-8"><meta name="viewport"
     content="width=device-width, initial-scale=1">
@@ -133,11 +144,15 @@ let
           Don't make Keephaven your only copy.
         </div>
       </main>
+      <script type="application/json" id="apps-off">__KH_APPS_OFF__</script>
       <script>
         var host = window.location.hostname;
         var services = [
           ${tilesJs}
         ];
+        var appsOff = [];
+        try { appsOff = JSON.parse(document.getElementById("apps-off").textContent); } catch (e) { appsOff = []; }
+        services = services.filter(function(s){ return appsOff.indexOf(s.key) < 0; });
         var total = services.length;
         var readyCount = 0;
         var grid = document.getElementById("grid");
@@ -595,7 +610,7 @@ let
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(PAGE.encode())
+            self.wfile.write(PAGE.replace("__KH_APPS_OFF__", json.dumps(apps_off())).encode())
         def do_POST(self):
             # "Install now" -> kick the (privileged, no-arg, fixed) staging unit.
             # No user input flows into the command. U3 = download/verify/stage only;

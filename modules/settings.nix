@@ -91,6 +91,19 @@ let
     # lines otherwise, which shifted the awk fields to empty). NR==2 = the data row.
     echo "data disk: $($co/df -hP ${dataDir} 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $3" used, "$4" free ("$5")"}')"
     echo "failed units: $(${pkgs.systemd}/bin/systemctl --failed --no-legend 2>/dev/null | $co/wc -l)"
+    # APP PICKER: apps the owner switched off show as "Exited" in the list below
+    # (or are absent); name them here so support does not read them as broken.
+    off=""
+    for a in ${lib.concatStringsSep " " config.keephaven.pickableApps}; do
+      if [ -e ${config.keephaven.appsDir}/$a.off ]; then off="$off $a"; fi
+    done
+    echo "apps off (owner's choice):''${off:- none}"
+    # Memory, box-wide and per container. Feeds the app picker's "will it fit"
+    # numbers (P3, measured on the test unit) and tells support whether a box is
+    # short of memory. Sizes only -- no personal data.
+    echo "memory:    $(${pkgs.procps}/bin/free -m 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $3" MB used of "$2" MB ("$7" MB available)"}')"
+    echo "app memory:"
+    ${pkgs.docker}/bin/docker stats --no-stream --format '  {{.Name}}: {{.MemUsage}}' 2>/dev/null | $co/sort || echo "  (docker unavailable)"
     echo "errors this boot: $(${pkgs.systemd}/bin/journalctl -p err -b --no-pager -q 2>/dev/null | $co/wc -l)"
     echo "services:"
     # {{.Status}} (not {{.State}}) so HEALTH shows: "Up 3h (unhealthy)" — a service
@@ -780,8 +793,55 @@ let
                     "This can take a few minutes.</p></div>")
         return ""
 
+    # ---- APP PICKER: Settings -> Apps (docs/architecture/app-picker.md) ----
+    # State comes from the root wrapper (the markers live on the data partition);
+    # Immich/Photos is always on and never listed.
+    APP_NAMES = {"jellyfin": "Movies (Jellyfin)", "navidrome": "Music (Navidrome)",
+                 "audiobookshelf": "Audiobooks (AudioBookshelf)", "kavita": "Books (Kavita)",
+                 "freshrss": "News (FreshRSS)"}
+
+    def app_states():
+        # [(app, is_on), ...] in image order; "backup" on a backup box; None if unreadable.
+        r = run(["sudo", "-n", "${wrappers.appSet}", "status"], timeout=10)
+        if r is None or r.returncode != 0:
+            return None
+        lines = (r.stdout or "").strip().splitlines()
+        if lines[:1] == ["backup-mode"]:
+            return "backup"
+        st = []
+        for line in lines:
+            p = line.split()
+            if len(p) == 2 and p[0] in APP_NAMES and p[1] in ("on", "off"):
+                st.append((p[0], p[1] == "on"))
+        return st
+
+    def apps_card():
+        # Pre-setup the page can still render via /done (an allowlisted result
+        # page), but POST /apps is refused there -- so don't show the card at all.
+        if not setup_done():
+            return ""
+        st = app_states()
+        # Nothing to pick (Photos edition), a backup box, or unreadable: no card.
+        if not st or st == "backup":
+            return ""
+        rows = "".join(
+            "<label class=\"appchk\"><input type=\"checkbox\" name=\"app\" value=\"" + a + "\""
+            + (" checked" if on else "") + "> " + html.escape(APP_NAMES[a]) + "</label>"
+            for a, on in st)
+        return ("<details class=\"section\" open><summary>Apps</summary><div class=\"card\">"
+                "<h2>Your apps</h2>"
+                "<p class=\"sub\">Untick an app to turn it off. Its files stay on your Keephaven "
+                "&mdash; nothing is deleted &mdash; and you can turn it back on any time. "
+                "Photos is always on.</p>"
+                "<form method=\"POST\" action=\"/apps\">" + rows +
+                "<label>Your password (the one on the sticker always works)</label>"
+                "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
+                "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
+                "<button type=\"submit\">Save apps</button></form></div></details>")
+
     def page(msg="", host=None):
         note = ("<div class='note'>" + html.escape(msg) + "</div>") if msg else ""
+        apps_card_html = apps_card()
         support = support_status_line()
         remote_card = remote_access_card()
         update_card_html = update_card()
@@ -830,6 +890,8 @@ let
                box-shadow:var(--shadow); padding:18px; margin-bottom:16px; }}
       .card h2 {{ font-size:1.05rem; margin:0 0 6px; }}
       label {{ display:block; margin:12px 0 4px; font-weight:600; font-size:.92rem; }}
+      label.appchk {{ display:flex; align-items:center; gap:10px; margin:8px 0; font-weight:500; font-size:1rem; }}
+      label.appchk input {{ width:20px; height:20px; margin:0; flex:none; }}
       input, select {{ width:100%; padding:10px; border:1px solid #ccd3db; border-radius:8px;
                        box-sizing:border-box; font-size:1rem; }}
       button {{ margin-top:16px; padding:11px 18px; border:0; border-radius:8px;
@@ -877,6 +939,7 @@ let
       {note}
       {update_card}
       {photos_card}
+      {apps_card}
       <details class="section" open>
         <summary>Network</summary>
         <div class="card">
@@ -950,8 +1013,8 @@ let
       <div class="card">
         <h2>Send a health report</h2>
         <p class="sub">If support asks for one, this shows a short technical summary of
-           how your Keephaven is doing &mdash; version, storage space, and whether each
-           app is running. <b>It contains none of your photos, files, or passwords.</b>
+           how your Keephaven is doing &mdash; version, storage space, memory, and whether
+           each app is running. <b>It contains none of your photos, files, or passwords.</b>
            You'll see exactly what it says before anything is sent, and nothing sends
            until you choose to.</p>
         <form method="GET" action="/health-report">
@@ -1019,7 +1082,7 @@ let
         }});
       }});
       </script>
-    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, home=html.escape(home))
+    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html, home=html.escape(home))
 
     def run(cmd, timeout=None):
         try:
@@ -1476,6 +1539,44 @@ let
                     return
                 self._msg("Support access is now on for " + hours + " hours. It will turn off by itself when the time is up.")
 
+            elif self.path == "/apps":
+                verdict = auth_check(data)
+                if verdict != "ok":
+                    self._msg(auth_deny_msg(verdict, "Your apps were NOT changed."))
+                    return
+                st = app_states()
+                if st == "backup":
+                    self._msg("This Keephaven is a backup box. Its apps stay off until it takes over.")
+                    return
+                if not st:
+                    self._msg("There are no apps to change on this Keephaven.")
+                    return
+                # Only names this box reported are acted on; anything else in the
+                # form is ignored, so the request cannot name a service.
+                want_on = set(data.get("app", []))
+                turned_on, turned_off, failed = [], [], []
+                for a, on in st:
+                    new_on = a in want_on
+                    if new_on == on:
+                        continue
+                    r = run(["sudo", "-n", "${wrappers.appSet}", a, "on" if new_on else "off"], timeout=60)
+                    if r is not None and r.returncode == 0:
+                        (turned_on if new_on else turned_off).append(APP_NAMES[a])
+                    else:
+                        failed.append(APP_NAMES[a])
+                parts = []
+                if turned_on:
+                    parts.append("Turned on: " + ", ".join(turned_on) + ". "
+                                 + ("They" if len(turned_on) > 1 else "It")
+                                 + " can take a few minutes to be ready on the home screen.")
+                if turned_off:
+                    parts.append("Turned off: " + ", ".join(turned_off) + ". "
+                                 + ("Their" if len(turned_off) > 1 else "Its")
+                                 + " files are still on your Keephaven.")
+                if failed:
+                    parts.append("Could not change: " + ", ".join(failed) + ". Restart your Keephaven and try again.")
+                self._msg(" ".join(parts) if parts else "Nothing changed.")
+
             elif self.path == "/support-access-revoke":
                 run(["sudo", "-n", "${wrappers.supportRevoke}"])
                 self._msg("Support access is now off.")
@@ -1767,6 +1868,7 @@ in
       { command = wrappers.pairStatus; options = [ "NOPASSWD" ]; }
       { command = wrappers.pairUnpair; options = [ "NOPASSWD" ]; }
       { command = wrappers.tailnetPeers; options = [ "NOPASSWD" ]; }
+      { command = wrappers.appSet; options = [ "NOPASSWD" ]; }
     ] ++ lib.optionals config.keephaven.replication.enable [
       { command = wrappers.replicaSyncNow; options = [ "NOPASSWD" ]; }
       { command = wrappers.replicaTargetStatus; options = [ "NOPASSWD" ]; }

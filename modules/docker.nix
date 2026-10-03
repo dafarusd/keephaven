@@ -21,6 +21,12 @@ in
     };
   };
 
+  # Per-container memory. The Pi firmware puts cgroup_disable=memory on the kernel
+  # command line ahead of ours, so without this `docker stats` (and the health
+  # report's "app memory:" lines) read 0B and Docker has no memory limits. Ours come
+  # later on the line. Hardware-verified on a Pi 5 through a normal update, 2026-10-03.
+  boot.kernelParams = [ "cgroup_enable=memory" "cgroup_memory=1" ];
+
   # dockerd's data-root lives on the data partition, so it must not start until
   # that partition is mounted (RequiresMountsFor adds both Requires and After on
   # the mount unit).

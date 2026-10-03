@@ -22,6 +22,14 @@ let
     { name = "Photos";     dir = "immich/external";      app = "immich"; }
   ];
 
+  # APP PICKER: a share whose app the owner switched off disappears. Each
+  # pickable share includes a small file the box rewrites from the .off markers
+  # (cloudunit-samba-apps below): empty when the app is on, "available = no /
+  # browseable = no" when it is off. Photos (Immich) is never pickable.
+  appsDir = config.keephaven.appsDir;
+  pickableShares = builtins.filter (s: builtins.elem s.app config.keephaven.pickableApps) shares;
+  shareInclude = s: "${appsDir}/smb-${s.app}.conf";
+
   shareSettings = lib.listToAttrs (map (s: {
     name = s.name;
     value = {
@@ -32,6 +40,8 @@ let
       "force user" = sambaUser;
       "create mask" = "0664";
       "directory mask" = "0775";
+    } // lib.optionalAttrs (builtins.elem s.app config.keephaven.pickableApps) {
+      include = shareInclude s;
     };
   }) shares);
 
@@ -84,6 +94,36 @@ in
       </service>
     </service-group>
   '';
+
+  # APP PICKER: render each pickable share's include file from the .off markers.
+  # Runs every boot BEFORE smbd, so smbd starts with the right share list; a later
+  # `systemctl restart` (the dashboard toggle, P2) re-renders and has a running
+  # smbd re-read its config. No markers (a box set up before the picker) = every
+  # include empty = every share exactly as before.
+  systemd.services.cloudunit-samba-apps = {
+    description = "Cloud Unit - hide network folders of apps the owner switched off";
+    before = [ "samba-smbd.service" ];
+    wantedBy = [ "multi-user.target" ];
+    unitConfig.RequiresMountsFor = dataDir;
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      mkdir -p ${appsDir}
+      ${lib.concatMapStringsSep "\n" (s: ''
+        if [ -e ${appsDir}/${s.app}.off ]; then
+          printf 'available = no\nbrowseable = no\n' > ${shareInclude s}.tmp
+        else
+          : > ${shareInclude s}.tmp
+        fi
+        mv -f ${shareInclude s}.tmp ${shareInclude s}
+      '') pickableShares}
+      if ${pkgs.systemd}/bin/systemctl -q is-active samba-smbd.service; then
+        ${pkgs.samba}/bin/smbcontrol smbd reload-config || true
+      fi
+    '';
+  };
 
   systemd.services.cloudunit-samba-bootstrap = {
     description = "Cloud Unit - Samba credential bootstrap (from unit.env)";

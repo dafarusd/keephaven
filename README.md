@@ -21,6 +21,7 @@ Around them:
 
 - **Its own Wi-Fi network.** Works with no internet and no router.
 - **One password** for the Wi-Fi, every app and the network folders.
+- **Apps you can switch off.** Settings → Apps turns Movies, Music, Audiobooks, Books or News off and back on. The files stay on the box. Photos is always on.
 - **Network folders** (SMB) for Movies, Music, Audiobooks and Books, so you can drag files in from any computer.
 - **A recovery copy of the system** on its own partition. If the system partition gets corrupted, the box restores it from that copy on the next boot.
 - **Signed updates.** The box checks once a day, shows an update on the dashboard, and installs only when you tap Install now. It refuses anything not signed by the key in `keys/keephaven-update.pub`.
@@ -31,25 +32,28 @@ The app images are pinned by digest and baked into the image. Nothing gets pulle
 
 ## Download
 
-Current release: **2026.08.19** — the same version the update server hands out to every box.
+Current release: **2026.10.03** — the same version the update server hands out to every box. What changed in each release: https://keephaven.co/releases
 
 Step-by-step setup lives on the site: https://keephaven.co/download#setup
 
-- File: [`keephaven-2026.08.19.img.zst`](https://updates.keephaven.co/download/keephaven-2026.08.19.img.zst)
-- Size: 6,266,477,542 bytes compressed, 35,445,014,528 bytes unpacked
-- SHA-256: `1c2134b55e729a87fbc270d60c9d18b73d93997361f57f548c30bb84dbc9ddd7`
+- File: [`keephaven-2026.10.03.img.zst`](https://updates.keephaven.co/download/keephaven-2026.10.03.img.zst)
+- Size: 6,265,741,902 bytes compressed, 35,445,014,528 bytes unpacked
+- SHA-256: `034fc869d160eefb162eeaab27ec9e8294ed7842f8f4a3b6d40c7755689b4632`
+
+There's also a Photos edition that runs only Immich. Its image is on the same download page.
 
 Check it before you flash:
 
 ```
-sha256sum keephaven-2026.08.19.img.zst
+sha256sum keephaven-2026.10.03.img.zst
 ```
 
 ## What you need
 
 - A Raspberry Pi 5. Tested on the 8 GB model.
 - An NVMe SSD on a Pi 5 NVMe case or HAT. Tested with a Samsung 990 PRO 1 TB. The system takes the first 35.4 GB and your files get the rest.
-- A computer to write the image to the SSD, and a microSD card with Raspberry Pi OS to read the setup password once (see First boot).
+- A computer to write the image to the SSD.
+- A micro-HDMI to HDMI cable and a TV or monitor, to read the setup password off the screen. Or a microSD card with Raspberry Pi OS, the older way (see First boot).
 
 Some NVMe cases need `PCIE_PROBE=1` in the Pi's EEPROM config before the Pi sees the drive. That's a Pi firmware setting, not part of this image.
 
@@ -64,7 +68,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 Then, with your SSD's name in place of `sdX`:
 
 ```
-zstd -d keephaven-2026.08.19.img.zst -o keephaven.img
+zstd -d keephaven-2026.10.03.img.zst -o keephaven.img
 sudo blkdiscard -f /dev/sdX
 sudo dd if=keephaven.img of=/dev/sdX bs=4M status=progress conv=fsync
 sync
@@ -76,7 +80,9 @@ sync
 
 1. Put the SSD in the Pi and plug in power. Ethernet is optional.
 2. Within about 3 minutes a Wi-Fi network named `Keephaven-` plus five characters shows up. The box made that name, and a random password, on this first boot.
-3. Sold boxes carry that password on a sticker. On a box you flashed yourself, read it off the drive once. The easiest way uses the Pi itself: unplug it at the wall, put in a microSD card with Raspberry Pi OS, leave the SSD connected, and power on. It boots Pi OS from the card. Then run:
+3. Sold boxes carry that password on a sticker. On a box you flashed yourself, the easy way is a TV. Plug a micro-HDMI cable from either of the Pi's HDMI ports into a TV or monitor. Within about 3 minutes of first boot the screen shows the Wi-Fi name, the password and the setup address, in large text. The password leaves the screen for good once setup is done.
+
+   No TV handy? Read it off the drive instead, using the Pi itself: unplug it at the wall, put in a microSD card with Raspberry Pi OS, leave the SSD connected, and power on. It boots Pi OS from the card. Then run:
 
    ```
    sudo mkdir -p /mnt/keephaven
@@ -90,7 +96,7 @@ sync
 4. Join the `Keephaven-…` network with that password. The setup page opens by itself. If it doesn't, go to `http://192.168.50.1`.
 5. Finish setup. The dashboard links all six apps. Username `keephaven`, same password. Photos (Immich) signs in with `keephaven@local` instead of a username.
 
-Settings live at port 8888 on the box. Changing the password there changes it everywhere.
+Settings live at port 8888 on the box. Changing the password there changes it everywhere. Settings → Apps turns an app off or back on.
 
 ## Build it yourself
 
@@ -110,7 +116,7 @@ To confirm this source is what built the download:
 nix eval --raw .#packages.aarch64-linux.prod.outPath --accept-flake-config
 ```
 
-At this commit it prints `/nix/store/1kiiky37ksyj8fil78f5f7y7c15xgwhh-nixos-image-rpi5-kernel.img.zst`, the same store path the published image was built as. Same source, same inputs. Your own build's bytes may still differ from the download, since that isn't checked bit for bit.
+At this commit it prints `/nix/store/ig1spx705bfdgqa85s9y26j5a9zgcx50-nixos-image-rpi5-kernel.img.zst`, the same store path the published image was built as. Same source, same inputs. Your own build's bytes may still differ from the download, since that isn't checked bit for bit.
 
 There are two builds from one module list:
 
@@ -136,7 +142,7 @@ If you'd rather not get updates from here, build with your own `keephaven.update
 ## Limits
 
 - Tested on a Pi 5 8 GB booting from NVMe only. SD card boot and the 4 GB Pi haven't been tested.
-- Reading the setup password takes one extra boot from a Raspberry Pi OS SD card, or a Linux computer.
+- Without a TV or monitor on the Pi's HDMI port, reading the setup password takes one extra boot from a Raspberry Pi OS SD card, or a Linux computer.
 - Code comments point at a build log and decision notes that aren't in this repo.
 - `compose/vaultwarden` is here but not switched on.
 

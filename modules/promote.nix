@@ -254,6 +254,28 @@ let
       ${dataDir}/immich/external 2>/dev/null || true
     say files-restored true "Your files are in place. Restoring the photo library next."
 
+    # ---- phase 3b: APP PICKER - adopt the main box's picks BEFORE phase 4 lets
+    # the services start, so an app the owner had switched off stays off here.
+    # The main box sends ONE snapshot file (apps-off.list) nightly; the receiver
+    # refuses --delete, so a markers folder would carry stale markers forever.
+    # No file (a main box from before the picker) = no markers = everything on,
+    # which is what that box ran. Names are matched against this image's own
+    # pickable list, so nothing from the other box becomes a path here.
+    ${pkgs.coreutils}/bin/rm -rf ${config.keephaven.appsDir}
+    ${pkgs.coreutils}/bin/mkdir -p ${config.keephaven.appsDir}
+    if [ -f "${landing}/apps-off.list" ]; then
+      # EXACT match per name (a substring test would accept a line such as
+      # "jellyfin navidrome" from the other box).
+      while read -r a; do
+        for p in ${lib.concatStringsSep " " config.keephaven.pickableApps}; do
+          if [ "$p" = "$a" ]; then
+            ${pkgs.coreutils}/bin/touch "${config.keephaven.appsDir}/$p.off"
+          fi
+        done
+      done < "${landing}/apps-off.list"
+    fi
+    ${pkgs.systemd}/bin/systemctl restart cloudunit-samba-apps.service || true
+
     # ---- phase 4: leave backup mode so the six services are no longer blocked.
     ${pkgs.coreutils}/bin/rm -f ${backupFlag}
 
@@ -383,7 +405,16 @@ let
       C="$(${pkgs.curl}/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:$P$H" 2>/dev/null)"
       case "$C" in (2[0-9][0-9]|3[0-9][0-9]) return 0 ;; (*) return 1 ;; esac
     }
-    UNHEALTHY="${lib.concatStringsSep " " config.keephaven.activeApps}"
+    # APP PICKER: an app the owner switched off is not expected to come up, so it
+    # is not waited on or reported as down.
+    UNHEALTHY=""
+    for svc in ${lib.concatStringsSep " " config.keephaven.activeApps}; do
+      case " ${lib.concatStringsSep " " config.keephaven.pickableApps} " in
+        (*" $svc "*) [ -e "${config.keephaven.appsDir}/$svc.off" ] && continue ;;
+      esac
+      UNHEALTHY="$UNHEALTHY $svc"
+    done
+    UNHEALTHY="$(echo $UNHEALTHY)"
     k=0
     while [ -n "$UNHEALTHY" ] && [ "$k" -lt 48 ]; do
       STILL=""

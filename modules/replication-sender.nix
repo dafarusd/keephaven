@@ -176,12 +176,24 @@ let
       exit 0
     fi
 
+    # APP PICKER: this box's picks as ONE snapshot file, rewritten every run, so a
+    # backup box that takes over turns on the same apps (promote.nix phase 3b).
+    # One file, not the markers folder: the receiver refuses --delete, so a folder
+    # would keep a marker the owner later removed. Sent first, it is a few bytes.
+    : > ${dataDir}/apps-off.list.tmp
+    for a in ${lib.concatStringsSep " " config.keephaven.pickableApps}; do
+      if [ -e "${config.keephaven.appsDir}/$a.off" ]; then
+        echo "$a" >> ${dataDir}/apps-off.list.tmp
+      fi
+    done
+    ${pkgs.coreutils}/bin/mv -f ${dataDir}/apps-off.list.tmp ${dataDir}/apps-off.list
+
     FAILED=""
     FSTATE=""
     FMSG=""
-    for d in immich/library immich/external jellyfin/media navidrome/media \
+    for d in apps-off.list immich/library immich/external jellyfin/media navidrome/media \
              audiobookshelf/media kavita/media; do
-      [ -d "${dataDir}/$d" ] || continue
+      [ -e "${dataDir}/$d" ] || continue
       if ! OUT="$(${pkgs.rsync}/bin/rsync -a -R -e "$SSH" \
            "${dataDir}/./$d" kh-replica@"$IP":. 2>&1)"; then
         FAILED="$FAILED $d"

@@ -14,7 +14,15 @@ let
         after = [ "network-online.target" ] ++ after;
         wants = [ "network-online.target" ];
         unitConfig = {
-          ConditionPathExists = setupFlag;
+          # APP PICKER: skip the provisioner of an app the owner switched off.
+          # Without this it would wait on health checks for a container that
+          # never starts and the box would sit "setting up" forever (the same
+          # trap finalize.nix documents for backup boxes). finalize's
+          # `start --no-block … || true` treats a condition-skipped unit as done.
+          ConditionPathExists =
+            if builtins.elem name config.keephaven.pickableApps
+            then [ setupFlag "!${config.keephaven.appsDir}/${name}.off" ]
+            else setupFlag;
           RequiresMountsFor = dataDir;
         };
         serviceConfig = {

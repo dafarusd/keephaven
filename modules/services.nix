@@ -6,6 +6,15 @@ let
   dataDir = "/var/lib/cloudunit";
 
   mkService = { name, description, needsEnv ? false, preUp ? "" }:
+    let
+      # systemd ANDs repeated ConditionPathExists, so each entry narrows.
+      conds = [ "!${dataDir}/.backup-mode" ]
+        # APP PICKER: a pickable app stays down while its .off marker exists
+        # (modules/editions.nix). No marker = runs, exactly as before the picker.
+        ++ lib.optional (builtins.elem name config.keephaven.pickableApps)
+             "!${config.keephaven.appsDir}/${name}.off"
+        ++ lib.optional needsEnv "${dataDir}/${name}/.env";
+    in
     {
       "cloudunit-${name}" = {
         inherit description;
@@ -25,11 +34,7 @@ let
           # stay stopped across every boot. Absent marker = today's behaviour
           # exactly, so a primary is unaffected. Phase 4's promotion removes the
           # marker, which is what lets the services come back.
-          ConditionPathExists = "!${dataDir}/.backup-mode";
-        } // lib.optionalAttrs needsEnv {
-          # NOTE both conditions must hold; systemd ANDs repeated
-          # ConditionPathExists, so this narrows rather than replaces.
-          ConditionPathExists = [ "!${dataDir}/.backup-mode" "${dataDir}/${name}/.env" ];
+          ConditionPathExists = if builtins.length conds == 1 then builtins.head conds else conds;
         };
         serviceConfig = {
           Type = "oneshot";
@@ -75,6 +80,54 @@ let
         '';
       };
     };
+
+  # APP PICKER: the ONE privileged entry point for switching an app on or off
+  # (Settings -> Apps, via sudo -n as cloudunit-web). Arguments are untrusted:
+  # the app must be in THIS image's pickable list and the state exactly on/off.
+  #   cloudunit-app-set status          -> "<app> on|off" per pickable app,
+  #                                        or "backup-mode" on a backup box
+  #   cloudunit-app-set <app> on|off
+  # The marker is written FIRST, so even a racing start is condition-blocked.
+  # Turning an app off never deletes its files.
+  appSet = pkgs.writeShellScriptBin "cloudunit-app-set" ''
+    set -u
+    APPS_DIR=${config.keephaven.appsDir}
+    SYSCTL=${pkgs.systemd}/bin/systemctl
+    PICKABLE="${lib.concatStringsSep " " config.keephaven.pickableApps}"
+    CMD="''${1-}"
+    if [ "$CMD" = status ]; then
+      if [ -e ${dataDir}/.backup-mode ]; then echo backup-mode; exit 0; fi
+      for a in $PICKABLE; do
+        if [ -e "$APPS_DIR/$a.off" ]; then echo "$a off"; else echo "$a on"; fi
+      done
+      exit 0
+    fi
+    APP="$CMD"; STATE="''${2-}"
+    [ -n "$APP" ] || { echo "no app given" >&2; exit 2; }
+    # EXACT match against the list. (A substring test like *" $APP "* lets
+    # "jellyfin navidrome" through as one argument -- caught in the P2 test.)
+    known=0
+    for a in $PICKABLE; do [ "$a" = "$APP" ] && known=1; done
+    [ "$known" = 1 ] || { echo "unknown app: $APP" >&2; exit 2; }
+    case "$STATE" in (on|off) ;; (*) echo "state must be on or off" >&2; exit 2 ;; esac
+    if [ -e ${dataDir}/.backup-mode ]; then
+      echo "this Keephaven is a backup box; its apps stay off until it takes over" >&2; exit 3
+    fi
+    ${pkgs.coreutils}/bin/mkdir -p "$APPS_DIR"
+    if [ "$STATE" = off ]; then
+      ${pkgs.coreutils}/bin/touch "$APPS_DIR/$APP.off"
+      $SYSCTL stop --no-block "cloudunit-$APP-provision.service" "cloudunit-$APP.service" || true
+    else
+      ${pkgs.coreutils}/bin/rm -f "$APPS_DIR/$APP.off"
+      $SYSCTL start --no-block "cloudunit-$APP.service" || true
+      # Restart (not start): re-runs first-time setup for an app that was off
+      # since setup, and is a no-op "already provisioned" for one that ran before.
+      $SYSCTL restart --no-block "cloudunit-$APP-provision.service" || true
+    fi
+    $SYSCTL restart cloudunit-samba-apps.service || true
+    ${pkgs.util-linux}/bin/logger -t cloudunit-apps "owner switched $APP $STATE"
+    echo ok
+  '';
 
   mkBootstrap = { name }:
     {
@@ -127,6 +180,8 @@ in
     };
   #   environment.etc."cloudunit/compose/vaultwarden/docker-compose.yml".source =
   #     ../compose/vaultwarden/docker-compose.yml;
+
+  cloudunit.wrappers.appSet = "${appSet}/bin/cloudunit-app-set";
 
   systemd.services =
     (mkService { name = "immich"; description = "Cloud Unit - Immich photo service"; needsEnv = true; })

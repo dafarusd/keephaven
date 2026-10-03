@@ -74,6 +74,27 @@ in
     '';
   };
 
+  # App picker (docs/architecture/app-picker.md). The edition decides what is IN
+  # the image; the owner decides what RUNS. An app runs unless
+  # <appsDir>/<app>.off exists. Absent marker = today's behaviour, so a box set up
+  # before the picker (no markers) keeps every app running after the update.
+  # Immich is always on in v1 (it carries the photo backups and the first-boot
+  # path), so it is never pickable and never gets a marker check.
+  options.keephaven.pickableApps = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    readOnly = true;
+    description = "Apps in this image the owner can switch off (activeApps minus immich).";
+  };
+  options.keephaven.appsDir = lib.mkOption {
+    type = lib.types.str;
+    readOnly = true;
+    description = "Where the per-app .off markers live (data partition, survives OTA).";
+  };
+
+  config.keephaven.pickableApps =
+    builtins.filter (a: a != "immich") config.keephaven.activeApps;
+  config.keephaven.appsDir = "/var/lib/cloudunit/apps";
+
   config.keephaven.activeApps = editions.${config.keephaven.edition};
   config.keephaven.activeBackupPaths =
     lib.concatMap (a: appBackup.${a}) config.keephaven.activeApps;
