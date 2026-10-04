@@ -27,6 +27,12 @@ let
   stateDir = "${dataDir}/tailscale";
   stateFile = "${stateDir}/tailscaled.state";
   stampFile = "${stateDir}/established.stamp";
+  # The owner turned remote access OFF. While this exists tailscaled never starts.
+  # In the state dir on purpose: a factory reset or a guard wipe takes it too.
+  offMarker = "${stateDir}/remote-access.off";
+  # The owner pressed ON this boot. Lets tailscaled start for a FIRST sign-in,
+  # before any stamp exists. In /run, so it never outlives a restart.
+  requestedFlag = "/run/cloudunit-remote-access.requested";
   unitEnv = "${dataDir}/unit.env";
   # The dev/prod oracle. Non-empty => dev (admin key baked); absent/empty =>
   # prod. SOLE writer is access-profile.nix.
@@ -84,6 +90,17 @@ let
     # working" and the card span forever. Never again: if it fails, the journal
     # says so and the card says so.
     "$LOG" -t cloudunit-remote-access "enable: requested"
+
+    # 0. tailscaled is not started at boot any more: it runs only once the owner
+    #    has turned remote access on (unit conditions at the bottom of this file).
+    #    Clear OFF and raise the this-boot flag BEFORE step 1 starts the daemon,
+    #    or its start is skipped and step 1 times out.
+    ${pkgs.coreutils}/bin/rm -f ${offMarker}
+    if ! ${pkgs.coreutils}/bin/touch ${requestedFlag}; then
+      "$LOG" -t cloudunit-remote-access "enable: FAILED - could not write ${requestedFlag}"
+      echo "could not start the remote-access service" >&2
+      exit 3
+    fi
 
     # 1. The daemon must be up AND answering before `tailscale up` is worth
     #    trying. On a fresh flash tailscaled starts ~2s after boot, before the
@@ -159,6 +176,70 @@ let
     echo "OK: remote access starting"
   '';
 
+  # Settings "Remote Access" disable: the real OFF switch (2026-10-03).
+  #
+  # Until this existed the card told owners to turn remote access off by starting
+  # setup over. That only removes .setup-complete: run on the test unit, the box
+  # went back to first-run setup and stayed connected. The one real off was a
+  # factory reset, which also removes every app's data.
+  #
+  # OFF = tailscaled is NOT RUNNING, and stays that way across a restart. A plain
+  # `tailscale down` was measured on the test unit and is not enough: the daemon
+  # kept connections open to Tailscale's servers. The sign-in is kept on disk, so
+  # ON again reconnects without a new link. OFF does not remove the box from the
+  # owner's account; only they can do that, in their console.
+  remoteAccessDisable = pkgs.writeShellScriptBin "cloudunit-remote-access-disable" ''
+    set -u
+    SYSTEMCTL=${pkgs.systemd}/bin/systemctl
+    TS=${pkgs.tailscale}/bin/tailscale
+    # Path ONLY -- same rule as the enable wrapper above.
+    LOG=${pkgs.util-linux}/bin/logger
+
+    # EVERY branch logs, same as enable: settings shows the owner one line, the
+    # journal has to carry the rest.
+    "$LOG" -t cloudunit-remote-access "disable: requested"
+
+    # A sign-in may be mid-flight (ON was clicked, the link never used). Its
+    # `tailscale up` would bring the box straight back, so end it first.
+    $SYSTEMCTL stop cloudunit-tailscale-login.service 2>/dev/null || true
+    $SYSTEMCTL reset-failed cloudunit-tailscale-login.service 2>/dev/null || true
+
+    # Mark OFF first. From this line on, nothing can start the daemon again: not
+    # a restart of the box, not systemd's own Restart=on-failure.
+    ${pkgs.coreutils}/bin/mkdir -p ${stateDir}
+    ${pkgs.coreutils}/bin/chmod 700 ${stateDir}
+    ${pkgs.coreutils}/bin/rm -f ${requestedFlag}
+    if ! ${pkgs.coreutils}/bin/touch ${offMarker}; then
+      "$LOG" -t cloudunit-remote-access "disable: FAILED - could not write ${offMarker}"
+      echo "could not turn remote access off" >&2
+      exit 5
+    fi
+
+    if $SYSTEMCTL is-active --quiet tailscaled.service; then
+      # Belt and braces: also tell tailscaled itself to stay disconnected, so a
+      # daemon that somehow runs without the marker still does not connect.
+      if ! ${pkgs.coreutils}/bin/timeout 20 $TS down; then
+        "$LOG" -t cloudunit-remote-access "disable: WARNING - tailscale down returned an error; stopping the daemon anyway"
+      fi
+      if ! $SYSTEMCTL stop tailscaled.service; then
+        "$LOG" -t cloudunit-remote-access "disable: FAILED - could not stop tailscaled"
+        echo "could not turn remote access off" >&2
+        exit 3
+      fi
+    else
+      "$LOG" -t cloudunit-remote-access "disable: tailscaled was not running"
+    fi
+
+    # Self-verify. Never report "off" while the daemon is still there.
+    if $SYSTEMCTL is-active --quiet tailscaled.service; then
+      "$LOG" -t cloudunit-remote-access "disable: FAILED - tailscaled is still running"
+      echo "remote access is still on" >&2
+      exit 4
+    fi
+    "$LOG" -t cloudunit-remote-access "disable: off (tailscaled stopped, marker set)"
+    echo "OK: remote access is off"
+  '';
+
   # Settings "Remote Access" status: report connected / a login URL / starting /
   # a state. Mirrors the enable gate: "connected" ONLY when genuinely online
   # (Running + Self.Online), never merely Running, so the card can't claim
@@ -209,7 +290,10 @@ in
     # path is the effective one (and --statedir derives from it -> certs/temp on
     # p4 too). Fail-safe even if that ever changed: state would fall back to the
     # system partition (lost on reflash) — a degradation, never a tailnet leak.
-    extraDaemonFlags = [ "--state=${stateFile}" ];
+    # --no-logs-no-support: tailscaled doesn't send its own diagnostic logs to
+    # Tailscale's log server. The cost is in the name: Tailscale will not help
+    # debug a box that sends no logs.
+    extraDaemonFlags = [ "--state=${stateFile}" "--no-logs-no-support" ];
   };
 
   # tailscaled handles its own firewall punching; this just ensures the
@@ -219,13 +303,15 @@ in
   # Make the CLI + the stamp writer + the Settings remote-access wrappers
   # available. All store paths are identical dev/prod.
   environment.systemPackages = [
-    pkgs.tailscale stampWriter remoteAccessEnable remoteAccessStatus
+    pkgs.tailscale stampWriter remoteAccessEnable remoteAccessDisable remoteAccessStatus
   ];
 
   # Expose the privileged remote-access wrappers to settings.nix (which owns the
   # UI + sudo grants) via the shared cloudunit.wrappers registry.
   cloudunit.wrappers.remoteAccessEnable =
     "${remoteAccessEnable}/bin/cloudunit-remote-access-enable";
+  cloudunit.wrappers.remoteAccessDisable =
+    "${remoteAccessDisable}/bin/cloudunit-remote-access-disable";
   cloudunit.wrappers.remoteAccessStatus =
     "${remoteAccessStatus}/bin/cloudunit-remote-access-status";
 
@@ -302,9 +388,23 @@ in
   # tailscaled waits for (and requires) the guard, and for the data mount.
   # requires = guard => if the guard somehow fails, tailscaled does NOT start
   # (fail-closed: no tailscale beats a leak).
+  #
+  # It also only starts for a box whose owner turned remote access on. The
+  # conditions:
+  #   stamp exists      -> remote access was turned on through Settings (the
+  #                        stamp is written by that path and nowhere else), OR
+  #   this-boot flag    -> ON was pressed just now, first sign-in, no stamp yet;
+  #   and NOT the OFF marker.
+  # "|" marks the either-or pair; the "!" line must hold as well. A box updated
+  # from an older release with remote access on has its stamp, so it carries on.
   systemd.services.tailscaled = {
     after = [ guardUnit ];
     requires = [ guardUnit ];
     unitConfig.RequiresMountsFor = dataDir;
+    unitConfig.ConditionPathExists = [
+      "|${stampFile}"
+      "|${requestedFlag}"
+      "!${offMarker}"
+    ];
   };
 }

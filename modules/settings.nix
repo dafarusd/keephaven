@@ -299,12 +299,25 @@ let
       if(!card) return;
       var body=document.getElementById("ra-body");
       var timer=null;
+      // What is on screen now. The poll runs every 3s; re-drawing an unchanged state
+      // would wipe a password being typed into the cancel form.
+      var shown="";
+      // Cancel while a sign-in is pending: the same OFF route as the connected card.
+      function cancelForm(){
+        var f=document.createElement("form"); f.method="POST"; f.action="/remote-access/off";
+        var l=document.createElement("label"); l.textContent="Changed your mind? Enter your password to cancel."; f.appendChild(l);
+        var w=document.createElement("div"); w.className="pwrow";
+        var i=document.createElement("input"); i.name="auth"; i.type="password"; i.autocomplete="off"; w.appendChild(i); f.appendChild(w);
+        var b=document.createElement("button"); b.type="submit"; b.className="neutral"; b.textContent="Cancel and turn off"; f.appendChild(b);
+        return f;
+      }
       function clear(){ while(body.firstChild) body.removeChild(body.firstChild); }
       function para(t){ var p=document.createElement("p"); p.className="sub"; p.textContent=t; return p; }
-      function showConnected(){ clear(); body.appendChild(para("Remote access is on and connected. You can reach your Keephaven from outside your home using your account.")); }
-      function showStarting(){ clear(); body.appendChild(para("Turning on… the sign-in link will appear here in a moment.")); var s=document.createElement("div"); s.className="ra-spin"; body.appendChild(s); }
-      function showUrl(u){ clear(); body.appendChild(para("Remote access is turning on. Open this link and sign in with your account to finish — you can leave this page:")); var d=document.createElement("div"); d.className="pw"; var a=document.createElement("a"); a.href=u; a.textContent=u; d.appendChild(a); body.appendChild(d); }
+      function showConnected(){ shown="connected"; clear(); body.appendChild(para("Remote access is on and connected. You can reach your Keephaven from outside your home using your account.")); }
+      function showStarting(){ if(shown==="starting") return; shown="starting"; clear(); body.appendChild(para("Turning on… the sign-in link will appear here in a moment.")); var s=document.createElement("div"); s.className="ra-spin"; body.appendChild(s); body.appendChild(cancelForm()); }
+      function showUrl(u){ if(shown==="url "+u) return; shown="url "+u; clear(); body.appendChild(para("Remote access is turning on. Open this link and sign in with your account to finish — you can leave this page:")); var d=document.createElement("div"); d.className="pw"; var a=document.createElement("a"); a.href=u; a.textContent=u; d.appendChild(a); body.appendChild(d); body.appendChild(cancelForm()); }
       function showError(){
+        shown="error";
         clear();
         body.appendChild(para("Remote access could not be turned on. Restart your Keephaven and try again; if it keeps failing, contact support@keephaven.co."));
         var f=document.createElement("form"); f.method="POST"; f.action="/remote-access";
@@ -312,7 +325,8 @@ let
         f.appendChild(b); body.appendChild(f);
       }
       function apply(out){
-        if(out==="connected"){ showConnected(); return false; }
+        // Reload once connected: the OFF form is rendered by the server only.
+        if(out==="connected"){ showConnected(); window.location.hash="ra-card"; window.location.reload(); return false; }
         if(out.indexOf("url ")===0){ showUrl(out.slice(4).trim()); return true; }
         // A dead login unit must STOP the spinner and say something actionable.
         if(out==="error"){ showError(); return false; }
@@ -353,16 +367,32 @@ let
             out = (r.stdout or "").strip()
         except Exception:
             pass
+        # One password row for both forms on this card (ON and OFF).
+        ra_pw_row = ("<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
+                     "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>")
         if out == "connected":
             state = "connected"
+            # The OFF switch (2026-10-03). Server-rendered only: ra_script reloads
+            # the page when a sign-in finishes, so there is one copy of this form.
             inner = ("<p class=\"sub\">Remote access is on and connected. You can reach your "
-                     "Keephaven from outside your home using your account.</p>")
+                     "Keephaven from outside your home using your account.</p>"
+                     "<p class=\"sub\">Turning it off also stops backups between two "
+                     "Keephavens and support access, until you turn it back on. Turning it "
+                     "back on usually needs no new sign-in.</p>"
+                     "<form method=\"POST\" action=\"/remote-access/off\">"
+                     "<label>Your password (the one on the sticker always works)</label>"
+                     + ra_pw_row +
+                     "<button class=\"neutral\" type=\"submit\">Turn off remote access</button></form>")
         elif out.startswith("url "):
             state = "url"
             u = html.escape(out[4:].strip())
             inner = ("<p class=\"sub\">Remote access is turning on. Open this link and sign in "
                      "with your account to finish &mdash; you can leave this page:</p>"
-                     "<div class=\"pw\"><a href=\"" + u + "\">" + u + "</a></div>")
+                     "<div class=\"pw\"><a href=\"" + u + "\">" + u + "</a></div>"
+                     "<form method=\"POST\" action=\"/remote-access/off\">"
+                     "<label>Changed your mind? Enter your password to cancel.</label>"
+                     + ra_pw_row +
+                     "<button class=\"neutral\" type=\"submit\">Cancel and turn off</button></form>")
         elif out == "error":
             state = "error"
             inner = ("<p class=\"sub\">Remote access could not be turned on. Restart your "
@@ -373,19 +403,22 @@ let
         elif out == "starting":
             state = "starting"
             inner = ("<p class=\"sub\">Turning on&hellip; the sign-in link will appear here in a "
-                     "moment.</p><div class=\"ra-spin\"></div>")
+                     "moment.</p><div class=\"ra-spin\"></div>"
+                     "<form method=\"POST\" action=\"/remote-access/off\">"
+                     "<label>Changed your mind? Enter your password to cancel.</label>"
+                     + ra_pw_row +
+                     "<button class=\"neutral\" type=\"submit\">Cancel and turn off</button></form>")
         else:
             state = "off"
             inner = ("<p class=\"sub\">Reach your Keephaven from outside your home. Turn this on, "
                      "then sign in with your account on the link that appears. You can turn it "
-                     "off any time by starting setup over or with a factory reset.</p>"
+                     "off again here any time.</p>"
                      "<p class=\"sub\">We ask for your password here because turning this on lets "
                      "you reach your Keephaven from outside your home &mdash; so it should only "
                      "ever be you who switches it on.</p>"
                      "<form id=\"ra-form\" method=\"POST\" action=\"/remote-access\">"
                      "<label>Your password (the one on the sticker always works)</label>"
-                     "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
-                     "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
+                     + ra_pw_row +
                      "<button type=\"submit\">Turn on remote access</button></form>")
         return ("<div class=\"card\" id=\"ra-card\" data-ra=\"" + state + "\">"
                 "<h2>Remote access</h2><div id=\"ra-body\">" + inner + "</div></div>"
@@ -1512,8 +1545,31 @@ let
                 # instead of dead-ending. No-JS browsers follow the 303 back to
                 # Settings, where the card shows "starting"; a re-click is harmless.
                 def ra_worker():
-                    run(["sudo", "-n", "${wrappers.remoteAccessEnable}"], timeout=20)
+                    # 45s, was 20: the wrapper now STARTS tailscaled (it no longer
+                    # runs from boot) and waits up to 15s for it to answer.
+                    run(["sudo", "-n", "${wrappers.remoteAccessEnable}"], timeout=45)
                 threading.Thread(target=ra_worker, daemon=True).start()
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+
+            elif self.path == "/remote-access/off":
+                # The real OFF switch (2026-10-03). Same danger-zone gate as ON:
+                # :8888 is open to the whole LAN, and off also stops a paired
+                # backup box and support access.
+                verdict = auth_check(data)
+                if verdict != "ok":
+                    self._msg(auth_deny_msg(verdict, "Remote access was NOT turned off."))
+                    return
+                # Synchronous on purpose. `tailscale down` takes well under a
+                # second, the wrapper checks its own result, and the owner must
+                # never be shown "off" on a guess.
+                r = run(["sudo", "-n", "${wrappers.remoteAccessDisable}"], timeout=45)
+                if r is None or r.returncode != 0:
+                    self._msg("Remote access could NOT be turned off. Restart your "
+                              "Keephaven and try again; if it keeps failing, contact "
+                              "support@keephaven.co.")
+                    return
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
@@ -1858,6 +1914,7 @@ in
       { command = "${readApPassword}/bin/cloudunit-read-ap-password"; options = [ "NOPASSWD" ]; }
       { command = "${healthReport}/bin/cloudunit-health-report"; options = [ "NOPASSWD" ]; }
       { command = wrappers.remoteAccessEnable; options = [ "NOPASSWD" ]; }
+      { command = wrappers.remoteAccessDisable; options = [ "NOPASSWD" ]; }
       { command = wrappers.remoteAccessStatus; options = [ "NOPASSWD" ]; }
       { command = wrappers.supportGrant; options = [ "NOPASSWD" ]; }
       { command = wrappers.supportRevoke; options = [ "NOPASSWD" ]; }
