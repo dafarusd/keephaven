@@ -98,8 +98,9 @@ let
     USED="$($co/du -sh ${landing} 2>/dev/null | $co/cut -f1)"
     FREE="$($co/df -Ph ${landing} 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $4}')"
     PCT="$($co/df -Ph ${landing} 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $5}')"
-    $co/printf 'target dumps=%s newest=%s source_version=%s used=%s free=%s diskpct=%s\n' \
-      "''${DUMPS:-0}" "''${NEWEST:-none}" "''${SRCVER:-unknown}" "''${USED:-0}" "''${FREE:-unknown}" "''${PCT:-unknown}"
+    PEER="$(${pkgs.gawk}/bin/awk -F= '/^PEER_SUFFIX=/{print $2; exit}' ${pairEnv})"
+    $co/printf 'target dumps=%s newest=%s source_version=%s used=%s free=%s diskpct=%s peer=%s\n' \
+      "''${DUMPS:-0}" "''${NEWEST:-none}" "''${SRCVER:-unknown}" "''${USED:-0}" "''${FREE:-unknown}" "''${PCT:-unknown}" "''${PEER:-unknown}"
   '';
 in
 {

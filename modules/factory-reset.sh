@@ -44,7 +44,11 @@ echo "Factory reset: erasing user data..."
 # replicated files. A factory reset hands the box to a new owner, so all of it
 # must go -- otherwise the new owner inherits a credential from, and a copy of,
 # the previous owner's other Keephaven. Same rationale as tailscale above.
-for d in immich jellyfin navidrome kavita audiobookshelf freshrss tailscale replication; do
+#
+# `ssh` holds this box's SSH host keys (base.nix keeps them on the data
+# partition so an update does not change them). A reset box gets new ones at
+# its next start, so it is not recognisable as the previous owner's box.
+for d in immich jellyfin navidrome kavita audiobookshelf freshrss tailscale replication ssh; do
   rm -rf "$DATADIR/$d"
 done
 rm -f "$DATADIR/current.env"

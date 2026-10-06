@@ -19,10 +19,14 @@ let
           # never starts and the box would sit "setting up" forever (the same
           # trap finalize.nix documents for backup boxes). finalize's
           # `start --no-block … || true` treats a condition-skipped unit as done.
+          #
+          # BACKUP BOX: its apps are off on purpose (services.nix has the same
+          # "!.backup-mode" condition), so a provisioner has no app to wait for.
+          # Skipped here. A promotion removes the marker before it starts these.
           ConditionPathExists =
-            if builtins.elem name config.keephaven.pickableApps
-            then [ setupFlag "!${config.keephaven.appsDir}/${name}.off" ]
-            else setupFlag;
+            [ setupFlag "!${dataDir}/.backup-mode" ]
+            ++ lib.optional (builtins.elem name config.keephaven.pickableApps)
+                 "!${config.keephaven.appsDir}/${name}.off";
           RequiresMountsFor = dataDir;
         };
         serviceConfig = {

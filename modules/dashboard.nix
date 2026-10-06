@@ -454,7 +454,7 @@ let
     </div>
     <script>
       function esc(x){{ return String(x==null?"":x).replace(/[<>&"]/g,
-        function(c){{ return {{"<":"&lt;",">":"&gt;","&":"&amp;","\"":"&quot;"}}[c]; }}); }}
+        function(c){{ return {{"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}}[c]; }}); }}
       function row(k,v){{ return "<div class='row'><span>"+esc(k)+"</span><b>"+esc(v)+"</b></div>"; }}
       function render(d){{
         var el = document.getElementById("c");

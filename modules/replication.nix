@@ -356,6 +356,8 @@ let
     # like a boot-time gremlin.
     if [ -f ${authKeys} ]; then : > ${authKeys} 2>/dev/null || true; fi
     ${pkgs.coreutils}/bin/rm -f ${pairEnv} ${keyFile} ${keyFile}.pub
+    # The sender's memory of the old partner's host key goes with the pairing.
+    ${pkgs.coreutils}/bin/rm -f ${replDir}/known_hosts ${replDir}/known_hosts.old ${replDir}/peer_nodekey
     ${pkgs.util-linux}/bin/logger -t cloudunit-replication "UNPAIRED (key revoked, pair record removed)"
     echo "OK: unpaired"
   '';

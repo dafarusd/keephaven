@@ -1013,7 +1013,7 @@ in
 {
   options.keephaven.imageVersion = lib.mkOption {
     type = lib.types.str;
-    default = "2026.10.04";
+    default = "2026.10.05";
     description = ''
       This build's update version, baked to /etc/cloudunit/update/version and
       compared (zero-padded lexical) against the vendor manifest. Owner bumps it

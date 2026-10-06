@@ -45,6 +45,14 @@ let
   # path here (-R), so dumps land under "dump/" on the receiver.
   outDir = "${replDir}/dump";
   statusFile = "${replDir}/sync-status.json";
+  # What this box remembers about the backup box's SSH host key. On the data
+  # partition (root's own ~/.ssh is on the system partition and is wiped by
+  # every update), inside the pairing folder so unpairing and a factory reset
+  # take it too.
+  knownHosts = "${replDir}/known_hosts";
+  # The paired box's Tailscale node key, as "<node id> <node key>", written by
+  # the sender after a good push. See peer_is_paired_node below.
+  nodeKeyFile = "${replDir}/peer_nodekey";
   immichEnv = "${dataDir}/immich/.env";
   versionFile = "/etc/cloudunit/update/version";
 
@@ -118,7 +126,131 @@ let
       exit 0
     fi
 
-    SSH="${pkgs.openssh}/bin/ssh -i ${keyFile} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=40"
+    # The host key is filed under the peer's durable Tailscale node id, not its
+    # address (addresses churn, see above).
+    ALIAS="keephaven-peer-$(printf '%s' "$NODEID" | ${pkgs.coreutils}/bin/tr -cd 'A-Za-z0-9')"
+    SSH="${pkgs.openssh}/bin/ssh -i ${keyFile} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${knownHosts} -o HostKeyAlias=$ALIAS -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=40"
+
+    # ---- who we are about to send to, and when a changed host key is accepted ----
+    # A box's host key used to live on its system partition and changed at every
+    # update (base.nix keeps it on the data partition now). The first update TO
+    # that fix still changes it once more, and pairs in the field were already
+    # stuck on "Host key verification failed" with nothing the owner could
+    # press. So the sender has to get itself out, without becoming a sender that
+    # accepts whatever answers.
+    #
+    # Two things identify the backup box, kept apart on purpose: its SSH host
+    # key (known_hosts) and its Tailscale node key (${nodeKeyFile}). Each one
+    # vouches for a change in the other; both unknown or both changed is refused:
+    #   host key same, node key new  -> a re-login on the backup box. The push
+    #                                   passes the host key check, so the new
+    #                                   node key is recorded.
+    #   host key new, node key same  -> an update on the backup box. Re-learn.
+    #   both new, or node key new and
+    #   no host key on file          -> not provably the same machine. Refuse;
+    #                                   the owner pairs again.
+    # The node id alone is not enough: whoever runs the coordination server
+    # could hand that id to another machine, which would carry another node key.
+    # A pair made before this existed has no node key on file. It is taken on
+    # the first good push, and until then the node id decides (as it always did
+    # on first contact).
+    AUDIT=${replDir}/host-key-changes.log
+    audit() {   # journal AND a file on the data partition: a box's journal starts over at every update
+      "$LOGGER" -t cloudunit-replication "sync: $*"
+      echo "$($co/date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >> "$AUDIT" 2>/dev/null || true
+    }
+    # The address has to be one Tailscale carries. tailscaled can still answer
+    # questions while it is not routing; a 100.x address would then leave by the
+    # LAN, to whatever answers there.
+    via_tailscale() {
+      ${pkgs.iproute2}/bin/ip -o route get "$IP" 2>/dev/null | ${pkgs.gnugrep}/bin/grep -q ' dev tailscale0 '
+    }
+    RELEARNED=0
+    PINNED_KEY=""
+    if [ -s ${nodeKeyFile} ]; then
+      read -r PIN_ID PIN_KEY < ${nodeKeyFile} || true
+      [ "''${PIN_ID:-}" = "$NODEID" ] && PINNED_KEY="''${PIN_KEY:-}"
+    fi
+    HAD_ENTRY=0
+    ${pkgs.openssh}/bin/ssh-keygen -F "$ALIAS" -f ${knownHosts} >/dev/null 2>&1 && HAD_ENTRY=1
+    SNAP_ID=""; SNAP_KEY=""
+    # Asked ONCE, before anything is sent. Every later decision in this run
+    # uses this answer, not a fresh one.
+    preflight() {   # 0 = go. Otherwise CSTATE/CMSG say why not, and nothing was sent.
+      if ! via_tailscale; then
+        CSTATE=unreachable; CMSG="couldn't find the backup Keephaven on your private network"; return 1
+      fi
+      WJ="$($co/timeout 15 ${pkgs.tailscale}/bin/tailscale whois --json "$IP" 2>/dev/null || true)"
+      SNAP_ID="$(printf '%s' "$WJ" | ${pkgs.jq}/bin/jq -r '.Node.StableID // empty' 2>/dev/null || true)"
+      SNAP_KEY="$(printf '%s' "$WJ" | ${pkgs.jq}/bin/jq -r '.Node.Key // empty' 2>/dev/null || true)"
+      if [ -z "$SNAP_ID" ]; then
+        # No answer is not a verdict. Tonight's run is skipped, nobody re-pairs.
+        CSTATE=unreachable; CMSG="couldn't find the backup Keephaven on your private network"; return 1
+      fi
+      if [ "$SNAP_ID" != "$NODEID" ]; then
+        audit "refused: $IP answers as Tailscale node $SNAP_ID, the paired node is $NODEID"
+        CSTATE=rejected; CMSG="couldn't confirm the other box is your backup Keephaven - pair the two boxes again"; return 1
+      fi
+      if [ -n "$PINNED_KEY" ] && [ "$SNAP_KEY" != "$PINNED_KEY" ] && [ "$HAD_ENTRY" != 1 ]; then
+        audit "refused: the backup box's Tailscale node key changed and there is no host key on file to vouch for it"
+        CSTATE=rejected; CMSG="couldn't confirm the other box is your backup Keephaven - pair the two boxes again"; return 1
+      fi
+      return 0
+    }
+    may_relearn() {   # a changed host key is accepted only for the paired node, with the node key we know
+      via_tailscale || return 1
+      [ -n "$SNAP_ID" ] && [ "$SNAP_ID" = "$NODEID" ] || return 1
+      if [ -n "$PINNED_KEY" ]; then
+        [ -n "$SNAP_KEY" ] && [ "$SNAP_KEY" = "$PINNED_KEY" ] || return 1
+      fi
+      return 0
+    }
+    record_node_key() {   # called once, right after the first push of a run has succeeded
+      [ -n "$SNAP_KEY" ] || return 0
+      [ "$SNAP_KEY" = "$PINNED_KEY" ] && return 0
+      # A key already on file is replaced only when the host key vouched for the
+      # machine: it was on file before this run and was not re-learned in it.
+      if [ -n "$PINNED_KEY" ]; then
+        [ "$HAD_ENTRY" = 1 ] && [ "$RELEARNED" = 0 ] || return 0
+      fi
+      TMPK="$($co/mktemp ${replDir}/.nodekey.XXXXXX)" || return 0
+      if $co/printf '%s %s\n' "$NODEID" "$SNAP_KEY" > "$TMPK" && $co/chmod 600 "$TMPK" && $co/mv -f "$TMPK" ${nodeKeyFile}; then
+        if [ -n "$PINNED_KEY" ]; then
+          audit "the backup box's Tailscale node key changed (same host key); recorded the new one"
+        else
+          audit "recorded the backup box's Tailscale node key"
+        fi
+        PINNED_KEY="$SNAP_KEY"
+      else
+        $co/rm -f "$TMPK"
+        "$LOGGER" -t cloudunit-replication "sync: could not record the backup box's Tailscale node key"
+      fi
+    }
+    push() {   # push <source>  -> OUT holds the transcript; returns rsync's verdict
+      OUT="$(${pkgs.rsync}/bin/rsync -a -R -e "$SSH" "$1" kh-replica@"$IP":. 2>&1)" && return 0
+      case "$OUT" in
+        *"Host key verification failed"*)
+          [ "$RELEARNED" = 0 ] || return 1
+          if ! may_relearn; then
+            audit "refused: the backup box's host key changed and it could not be confirmed as the paired node (node key differs, or the address is not on Tailscale)"
+            return 1
+          fi
+          RELEARNED=1
+          ${pkgs.openssh}/bin/ssh-keygen -R "$ALIAS" -f ${knownHosts} >/dev/null 2>&1 || true
+          if OUT="$(${pkgs.rsync}/bin/rsync -a -R -e "$SSH" "$1" kh-replica@"$IP":. 2>&1)"; then
+            audit "the backup box's host key changed; re-learned it (Tailscale node $NODEID at $IP, node key unchanged or first seen)"
+            return 0
+          fi
+          audit "the backup box's host key changed; the old one was forgotten but the retry failed, nothing learned yet"
+          ;;
+      esac
+      return 1
+    }
+
+    if ! preflight; then
+      status "$CSTATE" "$CMSG"
+      exit 0
+    fi
 
     # ---- 1. DUMP FIRST (see header) ----
     if ! DUMPOUT="$(${dumpBin} ${outDir} ${toString localKeep} 2>&1)"; then
@@ -144,11 +276,16 @@ let
           # No receiver verdict reached us: we never got far enough to be
           # refused, so this is a transport problem, not a policy one.
           case "$1" in
+            *"Host key verification failed"*)
+              # Only reached when re-learning was refused or did not help.
+              CSTATE=rejected
+              CMSG="couldn't confirm the other box is your backup Keephaven - pair the two boxes again"
+              ;;
             *"Permission denied"*|*publickey*)
               CSTATE=rejected
               CMSG="your backup Keephaven refused the connection - the two boxes may need pairing again"
               ;;
-            *"No route to host"*|*"Connection refused"*|*"Connection timed out"*|*"Network is unreachable"*|*"Connection closed"*|*"broken pipe"*)
+            *"No route to host"*|*"Connection refused"*|*"Connection timed out"*|*"Network is unreachable"*|*"Connection closed"*|*"Connection reset"*|*"broken pipe"*)
               CSTATE=unreachable
               CMSG="couldn't reach your backup Keephaven - check it's powered on and connected"
               ;;
@@ -169,12 +306,12 @@ let
     }
 
     # ---- 2. push the dump, then the media. Short flags ONLY. ----
-    if ! OUT="$(${pkgs.rsync}/bin/rsync -a -R -e "$SSH" \
-         ${replDir}/./dump kh-replica@"$IP":. 2>&1)"; then
+    if ! push ${replDir}/./dump; then
       classify "$OUT"
       status "$CSTATE" "$CMSG"
       exit 0
     fi
+    record_node_key
 
     # APP PICKER: this box's picks as ONE snapshot file, rewritten every run, so a
     # backup box that takes over turns on the same apps (promote.nix phase 3b).
@@ -194,8 +331,7 @@ let
     for d in apps-off.list immich/library immich/external jellyfin/media navidrome/media \
              audiobookshelf/media kavita/media; do
       [ -e "${dataDir}/$d" ] || continue
-      if ! OUT="$(${pkgs.rsync}/bin/rsync -a -R -e "$SSH" \
-           "${dataDir}/./$d" kh-replica@"$IP":. 2>&1)"; then
+      if ! push "${dataDir}/./$d"; then
         FAILED="$FAILED $d"
         # Keep the FIRST classification: it is the one that explains the run.
         if [ -z "$FSTATE" ]; then

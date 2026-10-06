@@ -62,7 +62,23 @@
 
     };
 
+    # Host keys live on the DATA partition, not in /etc/ssh.
+    # An update rewrites the system partition. On p4 a box keeps one identity
+    # through updates, so its paired Keephaven keeps recognising it. A factory
+    # reset removes the folder (factory-reset.sh), so a box that changes hands
+    # gets a new one.
+    hostKeys = [
+      { path = "/var/lib/cloudunit/ssh/ssh_host_ed25519_key"; type = "ed25519"; }
+      { path = "/var/lib/cloudunit/ssh/ssh_host_rsa_key"; type = "rsa"; bits = 4096; }
+    ];
+
   };
+
+  # Say the dependency out loud. The data partition's mount has no nofail and
+  # both units already order after local-fs.target, so this changes nothing
+  # today; it keeps it true if that mount is ever made optional.
+  systemd.services.sshd-keygen.unitConfig.RequiresMountsFor = "/var/lib/cloudunit";
+  systemd.services.sshd.unitConfig.RequiresMountsFor = "/var/lib/cloudunit";
 
   # ----- mDNS (.local discovery) -----
   # Advertise keephaven.local on the LAN so customers reach the unit by name.
