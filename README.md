@@ -25,10 +25,29 @@ Around them:
 - **Network folders** (SMB) for Movies, Music, Audiobooks and Books, so you can drag files in from any computer.
 - **A recovery copy of the system** on its own partition. If the system partition gets corrupted, the box restores it from that copy on the next boot.
 - **Signed updates.** The box checks once a day, shows an update on the dashboard, and installs only when you tap Install now. It refuses anything not signed by the key in `keys/keephaven-update.pub`.
-- **Box-to-box backup.** Pair two Keephavens over Tailscale and one keeps a nightly copy of the other.
+- **Box-to-box backup.** Pair two Keephavens over Tailscale and one keeps a nightly copy of the other. More under [Offsite backup](#offsite-backup).
 - **Remote access**, off by default, through your own Tailscale account.
 
 The app images are pinned by digest and baked into the image. Nothing gets pulled from Docker Hub at runtime.
+
+## Offsite backup
+
+Pair two Keephavens and the main one backs up to the other every night, around 3 am. Put the second box at another house.
+
+<p>
+  <img src="https://keephaven.co/assets/backup/main-home.webp" width="270" alt="A Keephaven home screen reading: Backed up to your second Keephaven today.">
+  <img src="https://keephaven.co/assets/backup/backup-box-home.webp" width="270" alt="The backup box's screen: This Keephaven is a backup, with the last backup received and the space used and free.">
+</p>
+
+- **What's sent:** the five shared folders (Movies, Music, Audiobooks, Books, Photos), Immich's own library, and a nightly dump of Immich's database. The backup box keeps the last 3 dumps.
+- **The backup box only receives.** Its end is a forced-command rsync receiver that refuses pulls and every delete option (`modules/replication.nix`).
+- **The sender checks who it's talking to:** the backup box's SSH host key and its Tailscale node key (`modules/replication-sender.nix`).
+- **One tap promotes the backup to main** (`modules/promote.nix`).
+- A backup box installs updates by itself.
+
+Limits: it's nightly, there's no version history, it needs remote access (Tailscale) on both boxes, the copy on the backup box isn't encrypted at rest, and app state (watch history, playlists, reading positions, News subscriptions) isn't part of it.
+
+More: https://keephaven.co/backup
 
 ## Download
 
