@@ -1,6 +1,6 @@
 # Keephaven
 
-A private home cloud. Photos, movies, music, audiobooks, books and news on a box in your house — no subscription, no account with anyone. Or, if you'd rather not buy a box, on a USB drive you write yourself and plug into a Windows PC you already own.
+A private home cloud. Photos, movies, music, audiobooks, books and news on a box in your house — no subscription, no account with anyone. Or, if you'd rather not build a box, on a USB drive you write yourself and plug into a Windows PC you already own.
 
 This repo is the whole OS: a NixOS flake that builds the exact image Keephaven runs, on a Raspberry Pi 5 or on a PC. Built solo by [@Dafarusd](https://x.com/Dafarusd).
 
@@ -69,14 +69,12 @@ sha256sum keephaven-2026.10.05.img.zst
 
 ## On a Windows PC instead of a box
 
-**Keephaven Photos SSD** is the same system on a USB drive, running on a Windows PC. No Pi, no box to buy — you supply a USB SSD of 64 GB or more and write it yourself. A small writer program erases that one drive, writes the image, reads all 36 GB back off it and checks it against the published checksum. Then you open the drive and double-click `Keephaven.exe`, and your photos live at `http://localhost` on that PC.
+**Keephaven Photos SSD** is the same system on a USB drive, running on a Windows PC. No Pi to buy, no box to build — you supply a USB SSD of 64 GB or more and write it yourself. A small writer program erases that one drive, writes the image, reads all 36 GB back off it and checks it against the published checksum. Then you open the drive and double-click `Keephaven.exe`, and your photos live at `http://localhost` on that PC.
 
 It's the same licence and the same source as the boxes. The drive edition's own parts here are `launcher/` (the Windows program and the QEMU it runs on), `writer/`, and `modules/pc-hardware.nix`.
 
 - What it is, what it needs, and the checksums: https://keephaven.co/ssd
 - The documentation, release checksums and how-to: https://github.com/dafarusd/keephaven-photos-ssd
-
-Three things it doesn't do: the drive isn't encrypted, Windows warns twice that the publisher is unknown because the programs aren't signed with a certificate, and file sharing over your house network doesn't work while Keephaven runs on a PC — Windows holds the one port it needs. Everything through the web page works normally.
 
 ## What you need
 

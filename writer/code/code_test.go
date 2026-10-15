@@ -338,7 +338,7 @@ func (w sectorWrapper) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func TestStampWorksThroughAWindowsStyleRawDevice(t *testing.T) {
-	const want = "KH-5A1484A6DFE4DB6E"
+	const want = "KH-0000000000000001"
 	// A 40 MiB partition so the marker is well past the first scan window on some layouts.
 	path, start, size := drive(t, "Keephaven - update code\n\n"+placeholder+"\n\ntail marker here.\n")
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -387,7 +387,7 @@ func TestABareRawDeviceIsRefusedBecauseTheFieldIsNeverAligned(t *testing.T) {
 	}
 	defer f.Close()
 	strict := &strictDevice{f: f, sector: 512}
-	_, err = Stamp(strict, start, size, "KH-5A1484A6DFE4DB6E")
+	_, err = Stamp(strict, start, size, "KH-0000000000000001")
 	if err == nil {
 		t.Fatal("Stamp claimed to work on a device that refuses unaligned access; on Windows that " +
 			"is the error the HP returned and the code would silently not be on the drive")

@@ -34,6 +34,21 @@ const Field = 64
 // and nothing that could read as a URL or a path.
 var Valid = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{7,63}$`)
 
+// Reserved is the one shape that is never minted: KH- followed by four zeros. Tests, examples,
+// documentation and posts use codes from this range so that no code-shaped string anywhere in
+// this tree can be one the update server would answer. It exists because the opposite happened:
+// on 2026-10-15 the live code from a test drive was found sitting in this package's own test,
+// in a tree about to be published, and a working update code in public source is exactly what
+// the gate is for. feed-gate/mint-code.sh refuses to mint one - a random 64-bit mint lands in
+// this range 1 time in 65536, so it draws again rather than hoping.
+//
+// Reserved codes are otherwise ordinary: Check accepts them and Stamp writes them, because a
+// test has to be able to stamp a drive. The server is what never issues one.
+var Reserved = regexp.MustCompile(`^KH-0000`)
+
+// IsReserved reports whether c is in the never-minted range.
+func IsReserved(c string) bool { return Reserved.MatchString(c) }
+
 // Device is the part of a disk this package touches.
 type Device interface {
 	io.ReaderAt

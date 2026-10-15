@@ -73,7 +73,7 @@
         modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ];
       };
 
-      # The PC target (x86-64, UEFI). NOT RELEASED. Same product modules, a
+      # The PC target (x86-64, UEFI): Keephaven Photos SSD. Same product modules, a
       # different hardware entry (modules/pc-hardware.nix).
       # extraModules exists for ONE caller: the bench drive, which is the customer build plus
       # keephaven.allowUpdateUrlOverride. Empty for dev and prod, so appending it leaves their
