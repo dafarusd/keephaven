@@ -151,6 +151,14 @@
           self.nixosConfigurations.keephaven-pc-photos-prod.config.keephaven.imageVersion;
       };
 
+      # The ONE file a buyer downloads. It fetches the image and the writer and starts the
+      # writer; it never opens a disk, and the writer never opens a socket.
+      packages.x86_64-linux.ssd-setup = import ./setup/package.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        imageVersion =
+          self.nixosConfigurations.keephaven-pc-photos-prod.config.keephaven.imageVersion;
+      };
+
       # Everything a buyer gets in one directory: the image as gzip, the writer, and a
       # checksum for each. Built from the prod image and the writer above, so the three can
       # never be a version apart.
