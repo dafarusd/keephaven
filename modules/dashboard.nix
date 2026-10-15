@@ -33,7 +33,29 @@ let
   # health check passes, so the user can never click into a half-started
   # service (which would show its raw setup screen). A progress bar shows how
   # many of the services are ready.
-  dashboardApp = pkgs.writeText "cloudunit-dashboard.py" ''
+  # PC target: a drive has no sticker and no TV. The wizard shows the password on its last step,
+  # but that page is gone after Finish, and the file it is also written to - Keephaven-password.txt
+  # - is unreadable from Windows while Keephaven runs, because the helper locks that partition for
+  # the whole run. So the dashboard, which is the screen an owner taps Photos from, says where it
+  # is. Immich's own login screen cannot explain itself.
+  #
+  # Double-quoted with explicit \n and the indentation written out: a '' block has its common
+  # indent stripped, which has bitten this tree twice today. The box's page is left byte-identical
+  # and the build asserts the anchor is present.
+  isPc = config.keephaven.platform == "pc";
+  # The anchor is renderPromoted's EARLY RETURN, not its last line. The last line is only
+  # reached when this unit was promoted from a backup, which a drive never is - there is no
+  # second box - so pollPromoted takes the early return on every call, wipes the banner and
+  # leaves. A note added after it would never render once, for ever. The first version of this
+  # did exactly that: proved in the generated file, never on a screen.
+  pwNoteAnchor = "if(!d || !d.promoted){ el.innerHTML = \"\"; return; }";
+  pwNotePc =
+    "if(!d || !d.promoted){ el.innerHTML = \"<div class='upd avail'><b>Opening \" +\n"
+    + "              \"Photos?</b> Use your Keephaven password. It is on the last page of \" +\n"
+    + "              \"setup, and in <b>Keephaven-password.txt</b> on the drive - to read \" +\n"
+    + "              \"that, type q in the Keephaven window and wait for 'safe to \" +\n"
+    + "              \"unplug'.</div>\"; return; }";
+  dashboardText = ''
     import http.server, socketserver, subprocess, json, os
     PORT = 80
     # APP PICKER: apps the owner switched off (an <app>.off marker in APPS_DIR) are
@@ -647,6 +669,14 @@ let
     with Threaded(("", PORT), Handler) as httpd:
         httpd.serve_forever()
   '';
+
+  dashboardApp = pkgs.writeText "cloudunit-dashboard.py"
+    (if isPc
+     then
+       assert lib.assertMsg (lib.hasInfix pwNoteAnchor dashboardText)
+         "dashboard.nix: the password note's anchor is missing from the page";
+       builtins.replaceStrings [ pwNoteAnchor ] [ pwNotePc ] dashboardText
+     else dashboardText);
 
   # Cached storage report: read-only du/df/DB, written to storage.json on a timer.
   # The dashboard's /storage endpoint just reads this file (like /update-status),

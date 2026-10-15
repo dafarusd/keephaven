@@ -1,8 +1,8 @@
 # Keephaven
 
-A private home cloud for the Raspberry Pi 5. Photos, movies, music, audiobooks, books and news on a box in your house — no subscription, no account with anyone.
+A private home cloud. Photos, movies, music, audiobooks, books and news on a box in your house — no subscription, no account with anyone. Or, if you'd rather not buy a box, on a USB drive you write yourself and plug into a Windows PC you already own.
 
-This repo is the whole OS: a NixOS flake that builds the exact image Keephaven boxes run. Built solo by [@Dafarusd](https://x.com/Dafarusd).
+This repo is the whole OS: a NixOS flake that builds the exact image Keephaven runs, on a Raspberry Pi 5 or on a PC. Built solo by [@Dafarusd](https://x.com/Dafarusd).
 
 ## What's on it
 
@@ -66,6 +66,17 @@ Check it before you flash:
 ```
 sha256sum keephaven-2026.10.05.img.zst
 ```
+
+## On a Windows PC instead of a box
+
+**Keephaven Photos SSD** is the same system on a USB drive, running on a Windows PC. No Pi, no box to buy — you supply a USB SSD of 64 GB or more and write it yourself. A small writer program erases that one drive, writes the image, reads all 36 GB back off it and checks it against the published checksum. Then you open the drive and double-click `Keephaven.exe`, and your photos live at `http://localhost` on that PC.
+
+It's the same licence and the same source as the boxes. The drive edition's own parts here are `launcher/` (the Windows program and the QEMU it runs on), `writer/`, and `modules/pc-hardware.nix`.
+
+- What it is, what it needs, and the checksums: https://keephaven.co/ssd
+- The documentation, release checksums and how-to: https://github.com/dafarusd/keephaven-photos-ssd
+
+Three things it doesn't do: the drive isn't encrypted, Windows warns twice that the publisher is unknown because the programs aren't signed with a certificate, and file sharing over your house network doesn't work while Keephaven runs on a PC — Windows holds the one port it needs. Everything through the web page works normally.
 
 ## What you need
 
@@ -137,6 +148,15 @@ nix eval --raw .#packages.aarch64-linux.prod.outPath --accept-flake-config
 
 At this commit it prints `/nix/store/jgama58m7f0fh2b1d1fddmw8x3b911w8-nixos-image-rpi5-kernel.img.zst`, the same store path the published image was built as. Same source, same inputs. Your own build's bytes may still differ from the download, since that isn't checked bit for bit.
 
+To build the drive edition instead, on an x86-64 Linux machine:
+
+```
+nix build .#packages.x86_64-linux.pc-photos-prod --accept-flake-config -o result-pc
+nix build .#packages.x86_64-linux.pc-photos-download --accept-flake-config -o result-download
+```
+
+The first is the whole-disk image; the second is what a download holds — the compressed image, the writer, the checksums and the how-to. No emulation needed for either: unlike the Pi images, this one is native on an x86-64 machine.
+
 There are two builds from one module list:
 
 - **prod** — no SSH key at all, SSH only over Tailscale. This is the download.
@@ -172,6 +192,8 @@ AGPL-3.0 — see `LICENSE`. Copyright (c) 2026 Keephaven LLC. Commercial license
 Keephaven™ and the Keephaven logo are trademarks of Keephaven LLC. The license covers the code, not the name or the logo.
 
 The apps inside the image keep their own licenses: Immich AGPL-3.0, Jellyfin GPL-2.0, Navidrome GPL-3.0, Audiobookshelf GPL-3.0, Kavita GPL-3.0, FreshRSS AGPL-3.0. Their source is at the links in the table above.
+
+Two files here are **GPL-2.0-only** and not ours to relicense: `launcher/qemu-windows/win32-hdev-fixed-length.patch`, our one change to QEMU's own source, and `keephaven-qemu.nix`, the recipe that compiles it. A derivative of GPL-2.0 code is GPL-2.0 whoever wrote it. Every drive carries QEMU's licence, that patch in full, the recipe and a written offer of the complete source.
 
 ---
 

@@ -8,6 +8,22 @@ path = ["modules/*.sh", "keys/**", "flake.lock", "*.md", "NOTICE", ".gitignore",
 SPDX-FileCopyrightText = "2026 Keephaven LLC"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
+# The drive edition's scripts. modules/update-regen-default-pc.py carries no header on
+# purpose: its bytes are injected verbatim into the drive's generated apply script and the
+# generator fails if the result differs anywhere outside the one function it replaces.
+[[annotations]]
+path = ["modules/update-regen-default-pc.py", "writer/*.sh", "tests/*.sh"]
+SPDX-FileCopyrightText = "2026 Keephaven LLC"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Our one change to QEMU's own source. A derivative of GPL-2.0 code is GPL-2.0 whoever
+# wrote it, so this cannot be relicensed and is not offered under other terms. The binary
+# built from it is GPL-2.0 as well, and every drive carries this patch in full beside it.
+[[annotations]]
+path = "launcher/qemu-windows/win32-hdev-fixed-length.patch"
+SPDX-FileCopyrightText = ["2026 Keephaven LLC", "The QEMU authors, for the code it changes"]
+SPDX-License-Identifier = "GPL-2.0-only"
+
 [[annotations]]
 path = "compose/**"
 SPDX-FileCopyrightText = ["2026 Keephaven LLC", "The authors of each upstream project whose published compose example the file follows"]

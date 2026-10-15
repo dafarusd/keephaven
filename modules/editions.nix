@@ -103,10 +103,13 @@ in
   # of its own edition. Entertainment stays at the bucket root (the shipped value,
   # so its image is unchanged); Photos points at the photos/ sub-path. The runtime
   # bench override (update.conf) still wins for testing.
+  # The PC target has its own pair of feeds under pc/, so a box is never offered
+  # an image built for other hardware. (Nothing is published there yet.)
   config.keephaven.updateBaseUrl =
+    let hw = lib.optionalString (config.keephaven.platform == "pc") "pc/"; in
     if config.keephaven.edition == "entertainment"
-    then "https://updates.keephaven.co/"
-    else "https://updates.keephaven.co/${config.keephaven.edition}/";
+    then "https://updates.keephaven.co/${hw}"
+    else "https://updates.keephaven.co/${hw}${config.keephaven.edition}/";
 
   # Drift guard (eval-time, path-neutral — a passing assertion adds nothing to the
   # build). Fires if an edition names an app with no appBackup entry, so no app can

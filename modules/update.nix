@@ -50,6 +50,97 @@ let
   # compares lexically against the baked running version, and writes a tiny
   # status.json the dashboard renders. Fail-soft: any error -> state=error, never
   # a crash. NO download/verify/apply here.
+  # ----- bug-C: a version that already rolled back on THIS unit is never offered again -----
+  # Without this the daily check overwrites the rolled-back status with update-available for the
+  # very image that failed, the dashboard renders "Install now", and the owner loops: install ->
+  # three failed boots -> rollback -> offered again tomorrow, for ever. The record has to be a
+  # file, because status.json is rewritten by every check.
+  #
+  # Shared module, so every string below is gated on isPc and the box renders "". They are
+  # DOUBLE-quoted with explicit \n and literal indentation on purpose: a '' block gets its
+  # common indent stripped, and an interpolation at the START of a line inside the script's ''
+  # string changes that common indent for the WHOLE script - which moved both box images
+  # (jgama58m -> 19dzvpa3) the first time this was written. Every interpolation below is
+  # appended to the END of an existing line and carries its own newlines.
+  #
+  # The file format and the state name are deliberately identical on both platforms, so the box
+  # fix is this gate flipping rather than a second design.
+  pcRbConst = lib.optionalString isPc "\nROLLED_BACK = os.path.join(UPDATE_DIR, \"rolled-back-versions\")";
+  pcRbConstUpd = lib.optionalString isPc "\nROLLED_BACK = os.path.join(UPD, \"rolled-back-versions\")";
+  # Fail CLOSED: an unreadable list counts as listed. Offering an image that may have already
+  # failed is worse than offering nothing, and either way the owner's next step is support.
+  pcRbReader = lib.optionalString isPc (
+    "\n\ndef refuses(v):"
+    + "\n    try:"
+    + "\n        with open(ROLLED_BACK) as f:"
+    + "\n            return v in {l.strip() for l in f if l.strip()}"
+    + "\n    except FileNotFoundError:"
+    + "\n        return False"
+    + "\n    except OSError:"
+    + "\n        return True");
+  # Used by BOTH rolled-back writers (confirm's resolve() else-branch and the watchdog's
+  # slow-but-good branch). tmp + fsync + os.replace, so a cut mid-write cannot leave half a
+  # version string. Also drops the 16 GiB candidate and its signature: frees p5 and makes it
+  # impossible to re-arm a known-bad image.
+  pcRbWriter = lib.optionalString isPc (
+    "\n\ndef record_rolled_back(v):"
+    + "\n    if v:"
+    + "\n        try:"
+    + "\n            have = set()"
+    + "\n            try:"
+    + "\n                with open(ROLLED_BACK) as f:"
+    + "\n                    have = {l.strip() for l in f if l.strip()}"
+    + "\n            except FileNotFoundError:"
+    + "\n                pass"
+    + "\n            have.add(v)"
+    + "\n            tmp = ROLLED_BACK + \".tmp\""
+    + "\n            with open(tmp, \"w\") as f:"
+    + "\n                f.write(\"\\n\".join(sorted(have)) + \"\\n\")"
+    + "\n                f.flush()"
+    + "\n                os.fsync(f.fileno())"
+    + "\n            os.replace(tmp, ROLLED_BACK)"
+    + "\n        except OSError:"
+    + "\n            pass"
+    + "\n    for p in (os.path.join(UPD, \"candidate.img\"),"
+    + "\n              os.path.join(UPD, \"candidate.img.minisig\")):"
+    + "\n        try:"
+    + "\n            os.remove(p)"
+    + "\n        except OSError:"
+    + "\n            pass");
+  # Captured BEFORE write_status("checking") overwrites the record, because that is the only
+  # moment the staged version is still readable.
+  pcStagedCapture = lib.optionalString isPc (
+    "\n    try:"
+    + "\n        cur_avail = str(json.load(open(STATUS)).get(\"available\", \"\")).strip()"
+    + "\n    except Exception:"
+    + "\n        cur_avail = \"\"");
+  # staged-ok must NOT short-circuit the fetch: a drive with .14 staged and never installed has
+  # to learn about .15 (the verifier's case E, which the first version of this got wrong). So the
+  # check runs normally and only PRESERVES staged-ok when the manifest still offers the very
+  # version that is staged - that is the case where a version-only verdict would throw away a
+  # verified 2.6 GB download for nothing.
+  pcStagedKeep = lib.optionalString isPc (
+    "\n    if cur_state == \"staged-ok\" and cur_avail and cur_avail == avail:"
+    + "\n        write_status({\"state\": \"staged-ok\", \"current\": cur, \"available\": cur_avail})"
+    + "\n        return 0");
+  # Restores the record the check overwrote with "checking", so the dashboard keeps saying what
+  # happened and renders no Install now. A NEWER version is not listed, so it is offered
+  # normally and the hold clears itself - there is no flag to reset, which is why a fixed build
+  # must never reuse a version string (gate).
+  pcCheckRefuse = lib.optionalString isPc (
+    "\n    if refuses(avail):"
+    + "\n        write_status({\"state\": \"rolled-back\", \"current\": cur, \"available\": avail,"
+    + "\n                      \"message\": \"an update to \" + avail +"
+    + "\n                                 \" did not work and was undone; the next one will be offered\"})"
+    + "\n        return 0");
+  # Defence in depth: nothing stages a version this drive already undid, whoever POSTs /install.
+  pcStageRefuse = lib.optionalString isPc (
+    "\n    if refuses(ver):"
+    + "\n        return fail(cur, ver, \"this version was already tried and undone on this drive\")");
+  pcRecordConfirm = lib.optionalString isPc "\n        record_rolled_back(applying)";
+  pcRecordWatchdog = lib.optionalString isPc (
+    "\n        if state == \"rolled-back\":"
+    + "\n            record_rolled_back(applying)");
   checkScript = pkgs.writeText "cloudunit-update-check.py" ''
     import json, os, re, sys, urllib.request
 
@@ -59,9 +150,9 @@ let
     APPLY_PENDING = os.path.join(UPDATE_DIR, "apply-pending")
     OVERRIDE = os.path.join(DATA_DIR, "update.conf")
     BAKED_URL = "/etc/cloudunit/update/url"
-    VERSION_FILE = "/etc/cloudunit/update/version"
+    VERSION_FILE = "/etc/cloudunit/update/version"${pcRbConst}${pcCodeConst}
     # zero-padded date version, optional -N suffix for same-day rebuilds
-    VERSION_RE = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(-[0-9]+)?$")
+    VERSION_RE = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(-[0-9]+)?$")${pcRbReader}
 
     def write_status(obj):
         os.makedirs(UPDATE_DIR, exist_ok=True)
@@ -85,19 +176,7 @@ let
         ua = "Keephaven-Update/" + (read_first_line(VERSION_FILE) or "unknown")
         return urllib.request.Request(url, headers={"User-Agent": ua})
 
-    def resolve_base_url():
-        # p4 override wins (bench): a line UPDATE_BASE_URL=...
-        try:
-            with open(OVERRIDE) as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("UPDATE_BASE_URL="):
-                        v = line.split("=", 1)[1].strip()
-                        if v:
-                            return v
-        except OSError:
-            pass
-        return read_first_line(BAKED_URL)
+    def resolve_base_url():${urlOverrideCheck}${urlBaseTail}
 
     def main():
         cur = read_first_line(VERSION_FILE)
@@ -110,7 +189,7 @@ let
         try:
             cur_state = json.load(open(STATUS)).get("state", "")
         except Exception:
-            cur_state = ""
+            cur_state = ""${pcStagedCapture}
         if cur_state in ("applying", "rolling-back", "downloading", "verifying"):
             return 0
         write_status({"state": "checking", "current": cur})
@@ -125,13 +204,11 @@ let
             with urllib.request.urlopen(ua_request(url), timeout=15) as r:
                 raw = r.read(65536)
             manifest = json.loads(raw.decode("utf-8"))
-        except Exception:
-            write_status({"state": "error", "current": cur, "message": "could not reach update server"})
-            return 0
+        ${fetchExcept}
         avail = str(manifest.get("version", "")).strip()
         if not VERSION_RE.match(avail):
             write_status({"state": "error", "current": cur, "message": "invalid manifest version"})
-            return 0
+            return 0${pcCheckRefuse}${pcStagedKeep}
         if VERSION_RE.match(cur) and avail <= cur:
             write_status({"state": "up-to-date", "current": cur})
         else:
@@ -181,14 +258,14 @@ let
     DOWNLOAD = os.path.join(UPDATE_DIR, "download.img.zst")
     CANDIDATE = os.path.join(UPDATE_DIR, "candidate.img")
     CANDIDATE_SIG = CANDIDATE + ".minisig"
-    PRE_UPDATE_DUMPS = os.path.join(UPDATE_DIR, "pre-update-dumps")
+    PRE_UPDATE_DUMPS = os.path.join(UPDATE_DIR, "pre-update-dumps")${pcRbConst}
     OVERRIDE = os.path.join(DATA_DIR, "update.conf")
     BAKED_URL = "/etc/cloudunit/update/url"
     VERSION_FILE = "/etc/cloudunit/update/version"
     P2_DEV = "/dev/disk/by-label/NIXOS_SD"
 
     VERSION_RE = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(-[0-9]+)?$")
-    SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+    SHA_RE = re.compile(r"^[0-9a-f]{64}$")${pcRbReader}${pcCodeConst}
     DEVNULL = subprocess.DEVNULL
 
     def write_status(obj):
@@ -206,18 +283,7 @@ let
         except OSError:
             return ""
 
-    def resolve_base_url():
-        try:
-            with open(OVERRIDE) as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("UPDATE_BASE_URL="):
-                        v = line.split("=", 1)[1].strip()
-                        if v:
-                            return v
-        except OSError:
-            pass
-        return read_first_line(BAKED_URL)
+    def resolve_base_url():${urlOverrideStage}${urlBaseTail}
 
     def ua_request(url):
         # Same UA hardening as the check script (DEVLOG 2026-07-23).
@@ -364,7 +430,7 @@ let
         iu = rel_join(base, img_url) if img_url else None
         su = rel_join(base, sig_url) if sig_url else None
         if not iu or not su:
-            return fail(cur, ver, "manifest image/signature url invalid")
+            return fail(cur, ver, "manifest image/signature url invalid")${pcStageRefuse}
         cap = manifest.get("image_size_compressed")
         cap = int(cap) + 16 * 1048576 if isinstance(cap, int) else 8 * 1024 * 1048576
         write_status({"state": "downloading", "current": cur, "available": ver})
@@ -410,6 +476,103 @@ let
   # GPT-parser-free initrd block needs into a FIRMWARE marker, writes the p4
   # apply-pending breadcrumb (drives confirm/watchdog), then reboots. Does NOT
   # write p2/p3. p3 stays OLD known-good.
+  # PC target: the install step below is the Pi's (it rebuilds a Pi boot folder
+  # and would stop on a missing device tree). Until the PC has its own, installing
+  # says no in so many words.
+  isPc = config.keephaven.platform == "pc";
+
+  # ----- The feed override, and why a drive does not get one (gate section 4a) -----
+  # UPDATE_BASE_URL in /var/lib/cloudunit/update.conf wins over the baked URL, which is how the
+  # bench points a unit at a laptop feed with no rebuild. On a BOX that file sits on an internal
+  # ext4 partition no other operating system ever mounts. On a DRIVE it sits on p5, which the
+  # buyer's Windows PC can write with no privileges at all - evidence 61 did exactly that with
+  # debugfs through the whole-disk ACL. One line there stops a drive updating for the rest of its
+  # life, and the dashboard it leaves behind ("could not reach update server") is character for
+  # character what every drive shows while the feed is unpublished, so the owner has nothing to
+  # notice. It cannot install someone else's image (minisign against the pubkey on the read-only
+  # system partition) and it cannot downgrade (avail <= cur), so the whole exposure is silent,
+  # permanent denial of updates - which is worth closing on a product a stranger pays for.
+  # His call, 2026-10-14: "turn it off for buyers, keep it for testing."
+  # Default keeps every box byte-identical; a bench DRIVE is the prod build plus this one line.
+  allowUrlOverride = config.keephaven.allowUpdateUrlOverride;
+  urlOverrideBody =
+    "\n    try:"
+    + "\n        with open(OVERRIDE) as f:"
+    + "\n            for line in f:"
+    + "\n                line = line.strip()"
+    + "\n                if line.startswith(\"UPDATE_BASE_URL=\"):"
+    + "\n                    v = line.split(\"=\", 1)[1].strip()"
+    + "\n                    if v:"
+    + "\n                        return v"
+    + "\n    except OSError:"
+    + "\n        pass";
+  # Two variants because the two generated scripts differ by one comment line today, and the
+  # boxes must come out byte-identical: any change to this text moves their outPaths.
+  urlOverrideCheck = lib.optionalString allowUrlOverride
+    ("\n    # p4 override wins (bench): a line UPDATE_BASE_URL=..." + urlOverrideBody);
+  urlOverrideStage = lib.optionalString allowUrlOverride urlOverrideBody;
+
+  # ----- The purchase code, and why it is a path segment and not a URL (gate 4a/4b) -----
+  # A drive asks its vendor for updates at the BAKED host and nothing else. The buyer's code is
+  # appended as one path segment, so a tampered code can only ever produce a 403 from our own
+  # server - it can never move the drive to somebody else's. The code is re-derived from p4 into
+  # /run (tmpfs) at every boot by keephaven-update-code.service, never read from p5 and never
+  # cached on disk, because both of those are writable from Windows without privileges.
+  # No code at all and a malformed code both become the literal segment "no-code", which the
+  # gate answers 403, so the owner is told rather than left with a drive that silently never
+  # updates. That refusal is the one thing 4a says must stay visible.
+  pcCodeConst = lib.optionalString isPc (
+    "\nCODE_FILE = \"/run/cloudunit/update-code\""
+    + "\nCODE_RE = re.compile(r\"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$\")");
+  # Generated indentation, not the source's: Nix dedents this file's '' string by four and a
+  # splice is inserted past that (gate section 9).
+  urlBaseTail =
+    if isPc then
+      "\n    base = read_first_line(BAKED_URL)"
+      + "\n    if not base:"
+      + "\n        return base"
+      + "\n    if not base.endswith(\"/\"):"
+      + "\n        base += \"/\""
+      + "\n    code = read_first_line(CODE_FILE)"
+      + "\n    if not code or not CODE_RE.match(code):"
+      + "\n        return base + \"no-code/\""
+      + "\n    return base + code + \"/\""
+    else "\n    return read_first_line(BAKED_URL)";
+  # The whole except arm, duplicated verbatim for the boxes, because the box scripts must come
+  # out byte-identical and a 401/403 arm cannot be added to a shared literal without moving them.
+  # getattr rather than urllib.error.HTTPError so the import line stays identical too.
+  fetchExcept =
+    if isPc then
+      "except Exception as e:"
+      + "\n        if getattr(e, \"code\", None) in (401, 403):"
+      + "\n            write_status({\"state\": \"error\", \"current\": cur,"
+      + "\n                          \"message\": \"this drive's update code was not accepted\"})"
+      + "\n            return 0"
+      + "\n        write_status({\"state\": \"error\", \"current\": cur, \"message\": \"could not reach update server\"})"
+      + "\n        return 0"
+    else
+      "except Exception:"
+      + "\n        write_status({\"state\": \"error\", \"current\": cur, \"message\": \"could not reach update server\"})"
+      + "\n        return 0";
+  # The drive's apply script, generated from the shipped one by swapping exactly one function.
+  # His instruction, 2026-10-13: the released Keephaven is not to be altered at all. So
+  # applyArmScript below is read as an input and never edited — its bytes, its store path and
+  # the box version's images are untouched — and this writes a second file beside it.
+  #
+  # Generated, not copied, so there is no second 182-line script to keep in step. The builder
+  # fails if it cannot find exactly one `regen_default`, or if the result differs from the
+  # shipped script anywhere outside it.
+  #
+  # Everything apply does is the same on both: the signature check, the size check, mounting
+  # the candidate, reading its baked system pointer, arming the system-partition write, the
+  # boot-prove counter, apply-pending and the revert. Only installing the boot files differs,
+  # because a box rebuilds a boot folder and a drive installs the one file the candidate
+  # already carries (modules/update-regen-default-pc.py, and pc-hardware.nix puts it there).
+  applyArmScriptPc = pkgs.runCommand "cloudunit-update-apply-arm-pc.py" { } ''
+    ${pkgs.python3}/bin/python3 ${./update-apply-arm-pc-build.py} \
+      ${applyArmScript} ${./update-regen-default-pc.py} $out
+  '';
+
   applyArmScript = pkgs.writeText "cloudunit-update-apply-arm.py" ''
     import glob, json, os, shutil, subprocess, sys
 
@@ -614,7 +777,7 @@ let
     FW_DEV = "/dev/disk/by-label/FIRMWARE"
     FW_MNT = "/run/cloudunit-update-fw-confirm"
     BOOTCOUNT = "cloudunit-update-bootcount"
-    P3_DEV = "/dev/disk/by-partlabel/cloudunit-recovery"
+    P3_DEV = "/dev/disk/by-partlabel/cloudunit-recovery"${pcRbConstUpd}${pcRbWriter}
 
     def active(u):
         return subprocess.run(["systemctl", "is-active", "--quiet", u]).returncode == 0
@@ -713,7 +876,7 @@ let
             state = "applied-ok"
         else:
             state = "rolled-back"
-            clear_bootcount()
+            clear_bootcount()${pcRecordConfirm}
         tmp = STATUS + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"state": state, "current": running, "available": applying}, f); f.write("\n")
@@ -750,7 +913,7 @@ let
     VERSION_FILE = "/etc/cloudunit/update/version"
     FW_DEV = "/dev/disk/by-label/FIRMWARE"
     FW_MNT = "/run/cloudunit-update-fw-wd"
-    REFLASH_MARKER = "cloudunit-reflash"
+    REFLASH_MARKER = "cloudunit-reflash"${pcRbConstUpd}${pcRbWriter}
     BOOTCOUNT = "cloudunit-update-bootcount"
 
     def active(u):
@@ -802,7 +965,7 @@ let
         if milestone():
             # slow-but-good: resolve like confirm.
             state = "applied-ok" if applying and applying == running else "rolled-back"
-            write_status({"state": state, "current": running, "available": applying})
+            write_status({"state": state, "current": running, "available": applying})${pcRecordWatchdog}
             try:
                 os.remove(PEND)
             except OSError:
@@ -1022,16 +1185,45 @@ in
     '';
   };
 
+  options.keephaven.productName = lib.mkOption {
+    type = lib.types.str;
+    default = "Keephaven";
+    description = ''
+      Which Keephaven this is: "Keephaven" for a box, "Keephaven SSD" for a drive run by a PC.
+      Declared here so every target can read it, but the /etc file that carries it is written
+      by the PC hardware module ALONE. Writing it from this shared module added a file to the
+      Pi images and moved their store paths — the one invariant that must not move. An option
+      with a default produces nothing on its own; a file does.
+    '';
+  };
+
+  options.keephaven.allowUpdateUrlOverride = lib.mkOption {
+    type = lib.types.bool;
+    # FALSE on a drive, because p5 is writable from the buyer's Windows PC without
+    # privileges and this override wins over the baked URL. See the long note beside
+    # urlOverrideBody above and section 4a of the ssd publish gate. The boxes keep it,
+    # which is also what keeps their images byte-identical.
+    default = !isPc;
+    description = ''
+      Whether UPDATE_BASE_URL in /var/lib/cloudunit/update.conf may override the baked
+      update base URL. True on the box editions. False on a drive, where that file is
+      reachable from the host operating system by an unprivileged write - a bench drive
+      sets it back to true and is otherwise the production build.
+    '';
+  };
+
   options.keephaven.updateBaseUrl = lib.mkOption {
     type = lib.types.str;
     # The real vendor host: Cloudflare R2 bucket "keephaven-updates" behind the
-    # custom domain. The bench can still point at a local http.server via the p4
-    # update.conf override (which wins over this baked value) — no rebuild to test.
+    # custom domain. The bench points a BOX at a local http.server via the
+    # update.conf override; a drive needs keephaven.allowUpdateUrlOverride = true,
+    # which is what packages.x86_64-linux.pc-photos-bench is for.
     default = "https://updates.keephaven.co/";
     description = ''
       Baked default update base URL (serves manifest.json + image + .minisig as
       plain static files). Overridden at runtime by UPDATE_BASE_URL in
-      /var/lib/cloudunit/update.conf (the bench override).
+      /var/lib/cloudunit/update.conf ONLY where keephaven.allowUpdateUrlOverride
+      is true - not on a drive a buyer gets.
     '';
   };
 
@@ -1093,14 +1285,31 @@ in
       # the clock is synced) — systemd-time-wait-sync waits for kernel-confirmed
       # sync. Wants (not Requires): offline, the job just stays queued until the
       # clock syncs — an offline check could not succeed anyway.
-      after = [ "network-online.target" "time-sync.target" "systemd-time-wait-sync.service" ];
-      wants = [ "network-online.target" "systemd-time-wait-sync.service" ];
+      # A box has no RTC, so it must wait for kernel-confirmed sync or https certificate
+      # validation fails against the update host. A PC has an RTC and it is already right -
+      # measured 2026-10-13, RTCTimeUSec within a second - and the wait never finishes on a
+      # drive at all: the docker bridges keep restarting timesyncd, NTPSynchronized stays no,
+      # and cloudunit-update-check sits queued behind systemd-time-wait-sync for ever. That is
+      # BLOCKER 2 from the 13:50 board entry, measured on the running drive (job 1390 waiting
+      # behind job 1482). The box keeps every line of this; the drive drops the wait only.
+      after = [ "network-online.target" "time-sync.target" ]
+              ++ lib.optional (!isPc) "systemd-time-wait-sync.service";
+      wants = [ "network-online.target" ]
+              ++ lib.optional (!isPc) "systemd-time-wait-sync.service";
       unitConfig.RequiresMountsFor = dataDir;
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.python3}/bin/python3 ${checkScript}";
       };
     };
+
+    # The drive polls like a box. This was disabled while "nothing is published for it and its
+    # install step isn't built" was true; the install step landed in 63f97f1 and he signed
+    # 2026.10.14 on 2026-10-13, so leaving it off meant a drive could never learn an update
+    # exists - the dashboard only offers "Install now" when the check has written
+    # update-available, and nothing else writes it. BLOCKER 1 from the 13:50 board entry.
+    # OnBootSec=3min + OnUnitActiveSec=1d + Persistent=true suits a drive that is only on
+    # sometimes: it catches up at the next start rather than missing the window.
 
     systemd.timers.cloudunit-update-check = {
       description = "Cloud Unit - periodic update check";
@@ -1136,7 +1345,9 @@ in
       path = [ pkgs.util-linux pkgs.coreutils pkgs.systemd verify ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${pkgs.python3}/bin/python3 ${applyArmScript}";
+        ExecStart =
+          if isPc then "${pkgs.python3}/bin/python3 ${applyArmScriptPc}"
+          else "${pkgs.python3}/bin/python3 ${applyArmScript}";
       };
     };
 
@@ -1196,6 +1407,21 @@ in
       # the OFFLINE private key, not just root write of p4 + the FIRMWARE marker).
       copy_bin_and_libs ${pkgs.minisign}/bin/minisign
     '';
+    # Both targets. This was gated to the Pi 5 while the PC had no install step, with a note
+    # that the PC would get "its own twin" — it needs none. Nothing in applyInitrd is
+    # Pi-shaped: the system partition is found by label, the firmware partition by being
+    # partition 1 (the EFI partition on a drive), the data partition by the offsets in the
+    # marker, and gen_rollback copies the whole nixos/rollback folder, which carries a
+    # linux.efi as well as it carries a kernel.img. Everything it calls is already in the
+    # drive's initrd: minisign from the block above, the disk tools from disk-layout.nix's
+    # recovery step (which runs on the drive every boot and reads the same vfat partition).
+    #
+    # What the gate would have cost, once the drive's arm step existed: arm installs the new
+    # boot file and reboots; with no writer in the initrd the system partition stays OLD; the
+    # recovery step only reflashes a CORRUPT partition, so it waves the healthy old one
+    # through; the new boot file's init= names a system that is not there — kernel panic, no
+    # boot-prove counter to count it, no rollback, loader timeout 0. A drive that never starts
+    # again. (Verifier, 2026-10-13, found by reading, before a drive did.)
     boot.initrd.postDeviceCommands = lib.mkBefore applyInitrd;
   };
 }

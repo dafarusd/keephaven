@@ -6,6 +6,36 @@ let
   setupFlag = "${dataDir}/.setup-complete";
   webUser = "cloudunit-web";
 
+  # ---- where the owner's password is written down ----
+  #
+  # A box has it printed on a sticker underneath. A drive has nowhere to print one,
+  # so keephaven-drive-sticker (pc-hardware.nix) writes the same lines to
+  # Keephaven-password.txt on the drive's Windows-visible partition, and that
+  # password keeps working after the owner changes theirs — exactly as a sticker's
+  # does, because it is the reset target either way.
+  #
+  # Every value below is the current wording VERBATIM when the platform is not pc,
+  # and each one keeps the string split and the line breaks of the text it replaces,
+  # so the generated page is byte-identical on a box and the box images do not move.
+  # Strings about the OTHER unit in a pairing (its name, its password) are left
+  # alone on purpose: the unit on the far end may well be a box with a sticker.
+  isPc = config.keephaven.platform == "pc";
+  pwHereLabel  = if isPc then "the one in Keephaven-password.txt" else "the one on the sticker";
+  pwHereThis   = if isPc then "the one in this drive's Keephaven-password.txt" else "the one on this box's sticker";
+  pwLabelReset = if isPc then "The password in Keephaven-password.txt" else "The password printed on your sticker";
+  pwFactory    = if isPc then "the password in Keephaven-password.txt" else "the password on your sticker";
+  pwIntro      = if isPc then "the one in Keephaven-password.txt on the drive." else "the one on your Keephaven sticker.";
+  authWhere    = if isPc then "one in the Keephaven-password.txt file on the drive."
+                 else "one printed on the sticker on the bottom of your Keephaven.";
+  setupOpenA   = if isPc then "Open the address in the " else "Open the address printed on the ";
+  setupOpenB   = if isPc then "Keephaven-password.txt file on the drive." else "sticker on the bottom of the box.";
+  pwResetA     = if isPc then "the password in the" else "the password printed";
+  pwResetB     = if isPc then "Keephaven-password.txt file on the drive." else "on the sticker on your Keephaven.";
+  frReconnectA = if isPc then "use the password in" else "connect using the network name and password on your";
+  frReconnectB = if isPc then "Keephaven-password.txt on the drive," else "sticker,";
+  pwOwnKind     = if isPc then "this drive's own password" else "this box's own sticker password";
+  pwOwnKindDone = if isPc then "this Keephaven's own password" else "this Keephaven's own sticker password";
+
   # Privileged wrappers contributed by domain modules (tailscale.nix,
   # support-access.nix). Settings owns the UI + the sudo grants; the wrappers
   # live with their domain. Values are absolute /nix/store bin paths.
@@ -169,8 +199,8 @@ let
                     "<title>Keephaven</title></head><body style=\"font-family:system-ui,sans-serif;"
                     "max-width:600px;margin:40px auto;padding:0 20px;line-height:1.5\">"
                     "<h1>Finish setting up first</h1><p>Settings become available once you have "
-                    "completed the short setup on your Keephaven. Open the address printed on the "
-                    "sticker on the bottom of the box.</p></body></html>")
+                    "completed the short setup on your Keephaven. ${setupOpenA}"
+                    "${setupOpenB}</p></body></html>")
     # Customer-exposure gate for the whole replication arc (replication.nix).
     # False on customer images until the Phase 4 restore path is gated: the
     # pairing card is not rendered at all, so a mid-arc box shows no backup UI.
@@ -239,7 +269,7 @@ let
         return "ok" if hmac.compare_digest(given, r.stdout.strip()) else "wrong"
 
     AUTH_WRONG = ("That password isn't right -- use your current password, or the "
-                  "one printed on the sticker on the bottom of your Keephaven.")
+                  "${authWhere}")
     AUTH_ERROR = ("We couldn't verify your password -- internal error. Restart "
                   "your Keephaven and try again.")
 
@@ -380,7 +410,7 @@ let
                      "Keephavens and support access, until you turn it back on. Turning it "
                      "back on usually needs no new sign-in.</p>"
                      "<form method=\"POST\" action=\"/remote-access/off\">"
-                     "<label>Your password (the one on the sticker always works)</label>"
+                     "<label>Your password (${pwHereLabel} always works)</label>"
                      + ra_pw_row +
                      "<button class=\"neutral\" type=\"submit\">Turn off remote access</button></form>")
         elif out.startswith("url "):
@@ -417,7 +447,7 @@ let
                      "you reach your Keephaven from outside your home &mdash; so it should only "
                      "ever be you who switches it on.</p>"
                      "<form id=\"ra-form\" method=\"POST\" action=\"/remote-access\">"
-                     "<label>Your password (the one on the sticker always works)</label>"
+                     "<label>Your password (${pwHereLabel} always works)</label>"
                      + ra_pw_row +
                      "<button type=\"submit\">Turn on remote access</button></form>")
         return ("<div class=\"card\" id=\"ra-card\" data-ra=\"" + state + "\">"
@@ -644,7 +674,7 @@ let
                 "<form method=\"POST\" action=\"/promote\">"
                 "<label>Type RESTORE to confirm</label>"
                 "<input name=\"confirm\" autocomplete=\"off\" placeholder=\"RESTORE\">"
-                "<label>Your password (the one on this box's sticker always works)</label>"
+                "<label>Your password (${pwHereThis} always works)</label>"
                 "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                 "<button class=\"danger\" type=\"submit\">Restore and make this my main Keephaven</button>"
@@ -682,7 +712,7 @@ let
                 "else (Movies, Music, Books, file sharing) uses this box's own password as "
                 "usual.</p>"
                 "<p class=\"sub\">You can fix that here, once. Enter the password you use for "
-                "Photos now, and it will be changed to this box's own sticker password like "
+                "Photos now, and it will be changed to ${pwOwnKind} like "
                 "everything else. This message then disappears on its own.</p>"
                 "<form method=\"POST\" action=\"/photos-signin-fix\">"
                 "<label>The password you currently use for Photos (from " + srch + "'s sticker)</label>"
@@ -703,7 +733,7 @@ let
         except Exception:
             pass
         eye = ("<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button>")
-        pw = ("<label>Your password (the one on the sticker always works)</label>"
+        pw = ("<label>Your password (${pwHereLabel} always works)</label>"
               "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">" + eye + "</div>")
         if out == "on":
             return ("<div class=\"card\"><h2>Backup box</h2>"
@@ -754,7 +784,7 @@ let
                         "one side. <b>Unpair here and pair the two boxes again</b> to fix it.</p>"
                         "<form method=\"POST\" action=\"/pair/unpair\" "
                         "onsubmit=\"return confirm('Remove the broken pairing from this Keephaven?');\">"
-                        "<label>Your password (the one on the sticker always works)</label>"
+                        "<label>Your password (${pwHereLabel} always works)</label>"
                         "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
                         "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                         "<button class=\"neutral\" type=\"submit\">Remove this pairing</button></form></div>")
@@ -773,7 +803,7 @@ let
                     + (backup_now_form() if role == "primary" else "")
                     + "<form method=\"POST\" action=\"/pair/unpair\" "
                     "onsubmit=\"return confirm('Unpair the two Keephavens now?');\">"
-                    "<label>Your password (the one on the sticker always works)</label>"
+                    "<label>Your password (${pwHereLabel} always works)</label>"
                     "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
                     "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                     "<button class=\"neutral\" type=\"submit\">Unpair</button></form></div>")
@@ -867,7 +897,7 @@ let
                 "&mdash; nothing is deleted &mdash; and you can turn it back on any time. "
                 "Photos is always on.</p>"
                 "<form method=\"POST\" action=\"/apps\">" + rows +
-                "<label>Your password (the one on the sticker always works)</label>"
+                "<label>Your password (${pwHereLabel} always works)</label>"
                 "<div class=\"pwrow\"><input name=\"auth\" type=\"password\" autocomplete=\"off\">"
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                 "<button type=\"submit\">Save apps</button></form></div></details>")
@@ -994,7 +1024,7 @@ let
                 onsubmit="return confirm('Change the password for Wi-Fi and all apps now?');">
             <label>New password (at least 8 characters, no spaces)</label>
             <input name="password" type="text" placeholder="Leave blank to keep current" minlength="8" maxlength="63">
-            <label>Current password (or the one on the sticker)</label>
+            <label>Current password (or ${pwHereLabel})</label>
             <div class="pwrow">
               <input name="auth" type="password" autocomplete="off">
               <button type="button" class="pweye" aria-label="Show or hide password"><svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
@@ -1020,7 +1050,7 @@ let
               <option value="24" selected>24 hours</option>
               <option value="72">72 hours (3 days)</option>
             </select>
-            <label>Your password (the one on the sticker always works)</label>
+            <label>Your password (${pwHereLabel} always works)</label>
             <div class="pwrow">
               <input name="auth" type="password" autocomplete="off">
               <button type="button" class="pweye" aria-label="Show or hide password"><svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
@@ -1058,11 +1088,11 @@ let
         <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Danger zone</summary>
         <div class="card">
           <h2>Reset password</h2>
-          <p class="sub">Forgot your password? This puts everything back to the password printed
-             on the sticker on your Keephaven. Your photos, files, and apps are not deleted.</p>
+          <p class="sub">Forgot your password? This puts everything back to ${pwResetA}
+             ${pwResetB} Your photos, files, and apps are not deleted.</p>
           <form method="POST" action="/reset-password"
-                onsubmit="return confirm('Reset the password back to the one on the sticker?');">
-            <label>The password printed on your sticker</label>
+                onsubmit="return confirm('Reset the password back to ${pwHereLabel}?');">
+            <label>${pwLabelReset}</label>
             <div class="pwrow">
               <input name="auth" type="password" autocomplete="off">
               <button type="button" class="pweye" aria-label="Show or hide password"><svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
@@ -1076,7 +1106,7 @@ let
              <b>kept</b> &mdash; nothing is deleted. The box restarts into setup.</p>
           <form method="POST" action="/soft-reset"
                 onsubmit="return confirm('Re-run setup now? Your photos and files are kept.');">
-            <label>Your password (the one on the sticker always works)</label>
+            <label>Your password (${pwHereLabel} always works)</label>
             <div class="pwrow">
               <input name="auth" type="password" autocomplete="off">
               <button type="button" class="pweye" aria-label="Show or hide password"><svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
@@ -1088,12 +1118,12 @@ let
           <h2>Factory reset</h2>
           <p class="sub"><b>This permanently deletes everything</b> &mdash; all your photos, music,
              movies, books, and files, and every app account. The box returns to how it was out of
-             the box, using the password on your sticker. This cannot be undone.</p>
+             the box, using ${pwFactory}. This cannot be undone.</p>
           <form method="POST" action="/factory-reset"
                 onsubmit="return confirm('This ERASES ALL your photos and files permanently. Are you absolutely sure?');">
             <label>Type ERASE to confirm</label>
             <input name="confirm" autocomplete="off" placeholder="ERASE">
-            <label>Your password (the one on the sticker always works)</label>
+            <label>Your password (${pwHereLabel} always works)</label>
             <div class="pwrow">
               <input name="auth" type="password" autocomplete="off">
               <button type="button" class="pweye" aria-label="Show or hide password"><svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
@@ -1463,11 +1493,11 @@ let
                     self._msg(auth_deny_msg(verdict, "Password was NOT reset."))
                     return
                 rs = run(["sudo", "-n", "${readSticker}/bin/cloudunit-read-sticker"])
-                sticker = rs.stdout.strip() if rs.returncode == 0 and rs.stdout.strip() else "the password on your sticker"
+                sticker = rs.stdout.strip() if rs.returncode == 0 and rs.stdout.strip() else "${pwFactory}"
                 if on_ap(self):
                     self._result(reconnect_page(sticker, current_ssid_safe(),
                         title="Password reset",
-                        intro="Your password is being put back to the one on your Keephaven sticker."))
+                        intro="Your password is being put back to ${pwIntro}"))
                 else:
                     self._result(saved_page("Password reset", sticker, "pw"))
                 def reset_worker():
@@ -1520,8 +1550,8 @@ let
       border-radius:10px; padding:16px; margin-top:20px; }}</style></head>
     <body><h1>Erasing&hellip;</h1>
     <p>Keephaven is being erased and will restart fresh. This takes a few minutes.</p>
-    <div class="big"><p>When it restarts, connect using the network name and password on your
-    sticker, then open {host} to set it up again.</p></div>
+    <div class="big"><p>When it restarts, ${frReconnectA}
+    ${frReconnectB} then open {host} to set it up again.</p></div>
     </body></html>""".format(host=kh_host()))
                 def fr_worker():
                     time.sleep(4)
@@ -1778,7 +1808,7 @@ let
                     self._msg("Couldn't change the Photos password just now. Nothing was changed; "
                               "you can still sign in to Photos with the other box's password.")
                 else:
-                    self._msg("Done - Photos now uses this Keephaven's own sticker password, "
+                    self._msg("Done - Photos now uses ${pwOwnKindDone}, "
                               "like everything else.")
 
             elif self.path == "/promote":

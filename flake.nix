@@ -21,14 +21,21 @@
       # maintained image definition to drift: dev and prod are the SAME
       # evaluated code, differing ONLY by the keephaven.profile value injected
       # below (which access-profile.nix turns into the two-root access diff).
-      sharedModules = [
-        {
-          imports = with nixos-raspberrypi.nixosModules; [
-            raspberry-pi-5.base
-            raspberry-pi-5.bluetooth
-            sd-image
-          ];
-        }
+      # The Pi 5 hardware entry: kernel, firmware, boot loader, image builder.
+      piHardware = {
+        imports = with nixos-raspberrypi.nixosModules; [
+          raspberry-pi-5.base
+          raspberry-pi-5.bluetooth
+          sd-image
+        ];
+      };
+
+      sharedModules = [ piHardware ] ++ productModules;
+
+      # The product itself. Hardware-neutral except where a module reads
+      # keephaven.platform (modules/platform.nix).
+      productModules = [
+        ./modules/platform.nix
         ./modules/access-profile.nix
         ./modules/support-access.nix
         ./modules/base.nix
@@ -58,11 +65,35 @@
         ./modules/update.nix
       ];
 
-      # profile = dev/prod; edition = the app payload (modules/editions.nix).
-      # edition defaults to entertainment, so the two original outputs are unchanged.
+      # profile = dev/prod (access-profile.nix); edition = the app payload
+      # (modules/editions.nix). edition defaults to "entertainment", so the two
+      # original outputs build exactly as before.
       mkUnit = { profile, edition ? "entertainment" }: nixos-raspberrypi.lib.nixosSystem {
         specialArgs = inputs;
         modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ];
+      };
+
+      # The PC target (x86-64, UEFI). NOT RELEASED. Same product modules, a
+      # different hardware entry (modules/pc-hardware.nix).
+      # extraModules exists for ONE caller: the bench drive, which is the customer build plus
+      # keephaven.allowUpdateUrlOverride. Empty for dev and prod, so appending it leaves their
+      # evaluated config - and their outPaths - untouched.
+      mkPc = { profile, edition ? "photos", extraModules ? [ ] }:
+        nixos-raspberrypi.inputs.nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        # keephavenLauncher: what goes on the drive's Windows-visible partition, built from
+        # launcher/. Passed in rather than imported in the module, so nothing about Windows
+        # is even looked at unless a PC image is being built.
+        specialArgs = inputs // {
+          keephavenLauncher = import ./launcher/qemu-windows/launcher.nix {
+            nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+            # null on a dirty tree; the drive then says so in its AGPL notice and the flash
+            # check refuses it as a customer drive.
+            rev = self.rev or null;
+          };
+        };
+        modules = [ ./modules/pc-hardware.nix ] ++ productModules
+          ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ] ++ extraModules;
       };
     in
     {
@@ -71,7 +102,8 @@
       nixosConfigurations.cloudunit-dev = mkUnit { profile = "dev"; };
       nixosConfigurations.cloudunit-prod = mkUnit { profile = "prod"; };
 
-      # Photos edition — Immich only, same shared base. Flashed fresh.
+      # Photos edition — Immich only, same shared base. Flashed fresh; never an
+      # update to an Entertainment box.
       nixosConfigurations.cloudunit-photos-dev = mkUnit { profile = "dev"; edition = "photos"; };
       nixosConfigurations.cloudunit-photos-prod = mkUnit { profile = "prod"; edition = "photos"; };
 
@@ -84,5 +116,120 @@
         self.nixosConfigurations.cloudunit-photos-prod.config.system.build.sdImage;
       packages.aarch64-linux.photos-dev =
         self.nixosConfigurations.cloudunit-photos-dev.config.system.build.sdImage;
+
+      # The PC target's drive image (Photos edition, dev profile for gating).
+      nixosConfigurations.keephaven-pc-photos-dev = mkPc { profile = "dev"; };
+      packages.x86_64-linux.pc-photos-dev =
+        self.nixosConfigurations.keephaven-pc-photos-dev.config.system.build.sdImage;
+      # The customer PC build — the twin of the above, exactly as the Pi has twins.
+      # Everything proven on hardware up to 2026-10-13 was proven on the DEV image, which
+      # carries the kh-admin key and answers sshd on the LAN. Nothing a stranger gets may.
+      # access-profile.nix is the only module that branches on this, and it flips exactly two
+      # things, so `nix store diff-closures` between these two must show only those two roots.
+      nixosConfigurations.keephaven-pc-photos-prod = mkPc { profile = "prod"; };
+      packages.x86_64-linux.pc-photos-prod =
+        self.nixosConfigurations.keephaven-pc-photos-prod.config.system.build.sdImage;
+
+      # The bench drive: the CUSTOMER build plus exactly one option, so a hardware update test
+      # is not a test of a different drive. A buyer's drive refuses the update.conf feed override
+      # because p5 is writable from Windows with no privileges (gate section 4a, his call
+      # 2026-10-14: off for buyers, kept for testing); this build takes it back so a drive can be
+      # pointed at the laptop feed without a 36 GB rebuild. NEVER flash this for anyone else and
+      # never name it as a ship artifact: it differs from pc-photos-prod by this one option, which
+      # is the point - `nix store diff-closures` between them must show only the update scripts.
+      nixosConfigurations.keephaven-pc-photos-bench =
+        mkPc { profile = "prod"; extraModules = [ { keephaven.allowUpdateUrlOverride = true; } ]; };
+      packages.x86_64-linux.pc-photos-bench =
+        self.nixosConfigurations.keephaven-pc-photos-bench.config.system.build.sdImage;
+
+      # The program a buyer runs on Windows to put the image on a drive. Not part of any
+      # image and never on a drive - it ships in the download beside the image. The version it
+      # prints is the image's, tied together here so a support e-mail naming one names both.
+      packages.x86_64-linux.ssd-writer = import ./writer/package.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        imageVersion =
+          self.nixosConfigurations.keephaven-pc-photos-prod.config.keephaven.imageVersion;
+      };
+
+      # Everything a buyer gets in one directory: the image as gzip, the writer, and a
+      # checksum for each. Built from the prod image and the writer above, so the three can
+      # never be a version apart.
+      packages.x86_64-linux.pc-photos-download = import ./download.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        image = self.packages.x86_64-linux.pc-photos-prod;
+        writer = self.packages.x86_64-linux.ssd-writer;
+        imageVersion =
+          self.nixosConfigurations.keephaven-pc-photos-prod.config.keephaven.imageVersion;
+      };
+
+      # VM tests. They run on the build machine (x86_64, KVM) against the same
+      # nixpkgs the images use, and are not part of any image.
+      checks.x86_64-linux.setup-screen = import ./tests/setup-screen.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      };
+
+      # The PC target (keephaven.platform = "pc"), Photos edition, taken through
+      # setup in a VM with the amd64 app images. Not released; see the test's header.
+      # The buyer's drive must not honour UPDATE_BASE_URL in update.conf, and the bench build
+      # must still honour it - a flag that silently stops working would take the hardware update
+      # test with it. Reads the generated scripts themselves, so it cannot be fooled by the
+      # option being set and the text being spliced in anyway. Gate section 4a.
+      checks.x86_64-linux.ssd-no-url-override =
+        let
+          np = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+          scriptsOf = cfg: "${cfg.systemd.services.cloudunit-update-check.serviceConfig.ExecStart} "
+            + "${cfg.systemd.services.cloudunit-update-stage.serviceConfig.ExecStart}";
+          ship = scriptsOf self.nixosConfigurations.keephaven-pc-photos-prod.config;
+          bench = scriptsOf self.nixosConfigurations.keephaven-pc-photos-bench.config;
+        in
+        np.runCommand "ssd-no-url-override" { } ''
+          shipped=0
+          for f in ${ship}; do
+            case "$f" in *.py) ;; *) continue ;; esac
+            shipped=$((shipped + 1))
+            if grep -q "UPDATE_BASE_URL=" "$f"; then
+              echo "FAIL: a buyer's drive still reads the update.conf feed override: $f" >&2
+              exit 1
+            fi
+          done
+          [ "$shipped" = 2 ] || { echo "FAIL: expected 2 shipped scripts, found $shipped" >&2; exit 1; }
+
+          benched=0
+          for f in ${bench}; do
+            case "$f" in *.py) ;; *) continue ;; esac
+            if grep -q "UPDATE_BASE_URL=" "$f"; then benched=$((benched + 1)); fi
+          done
+          [ "$benched" = 2 ] || {
+            echo "FAIL: the bench drive lost the override too ($benched of 2) - the hardware" >&2
+            echo "      update test has no way to reach a laptop feed without a rebuild." >&2
+            exit 1; }
+
+          echo "the buyer's drive ignores update.conf; the bench drive still honours it"
+          touch $out
+        '';
+
+      checks.x86_64-linux.pc-photos = import ./tests/pc-photos.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+        inherit productModules;
+        # The eight files that go on the drive's Windows-visible partition. The test has no
+        # partitions (it leaves disk-layout.nix out), so it reads them from the build that
+        # produces them rather than from a disk - which is also the only way to check them
+        # without a real drive in the room.
+        launcherFiles =
+          let
+            l = import ./launcher/qemu-windows/launcher.nix {
+              nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+              rev = self.rev or null;
+            };
+            shipped = self.nixosConfigurations.keephaven-pc-photos-prod.config.keephaven.imageVersion;
+          in
+          # launcher.nix PARSES the version out of pc-hardware.nix's text to build the tag. That
+          # catches nothing if the option it ships under ever stops matching what the file says,
+          # so tie the two together here: eval-time, zero cost, and the drive text's tag can
+          # never name a version the image does not carry. The verifier's line.
+          assert nixos-raspberrypi.inputs.nixpkgs.lib.assertMsg (l.imageVersion == shipped)
+            "the launcher's parsed version ${l.imageVersion} is not the drive's ${shipped}";
+          l;
+      };
     };
 }

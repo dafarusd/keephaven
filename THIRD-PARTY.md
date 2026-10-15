@@ -1,8 +1,8 @@
-# Third-party software in the Keephaven image
+# Third-party software in Keephaven
 
-This repo's own code, the NixOS modules and scripts that turn a Raspberry Pi 5 into a Keephaven, is AGPL-3.0 (see `LICENSE`).
+This repo's own code — the NixOS modules and scripts that turn a Raspberry Pi 5 into a Keephaven box, and the Windows program and writer that run the drive edition on a PC — is AGPL-3.0 (see `LICENSE`).
 
-The image it builds also contains other people's software. Each keeps its own license, and nothing in Keephaven's license changes that. If you ship boxes with this image, their terms apply to you as well as ours.
+The images it builds also contain other people's software. Each keeps its own license, and nothing in Keephaven's license changes that. If you ship boxes or drives built from this, their terms apply to you as well as ours.
 
 ## The apps
 
@@ -40,4 +40,19 @@ Built from nixpkgs and nixos-raspberrypi at the exact revisions in `flake.lock`.
 
 Source for everything in the OS is reproducible from `flake.lock`: `nix build` fetches the same inputs this image was built from.
 
-Licenses checked 2026-09-28 against each project's GitHub license field, nixpkgs `meta.license`, and VectorChord's README.
+## The drive edition's extras
+
+The drive edition builds the same system for x86-64 and adds a Windows program to start it. These are what that brings in beyond the list above.
+
+| Component | Role | License | Source |
+|---|---|---|---|
+| QEMU 11.1.0, with one patch of ours | Runs Keephaven on a Windows PC | GPL-2.0, and so is our patch | https://www.qemu.org/ , and `launcher/qemu-windows/` here |
+| OVMF / edk2 | UEFI firmware the drive boots through | BSD-2-Clause-Patent | https://github.com/tianocore/edk2 |
+| systemd, its EFI stub and ukify | Build `linux.efi` on the drive | LGPL-2.1-or-later | https://github.com/systemd/systemd |
+| Go standard library | The Windows program and the writer | BSD-3-Clause | https://go.dev/ |
+
+**QEMU is the one we changed.** `launcher/qemu-windows/win32-hdev-fixed-length.patch` is a change to QEMU's own `block/file-win32.c`; a derivative of GPL-2.0 code is GPL-2.0 whoever wrote it, and so is `keephaven-qemu.nix`, the recipe that compiles it. Every drive carries QEMU's licence, that patch in full, the recipe, the package pin, and a written offer of the complete corresponding source good for three years. Nothing has to be fetched to rebuild the binary: the recipe and its lock are on the drive.
+
+Samba is in the drive image too, although file sharing over the house network does not work while Keephaven runs on a PC — Windows itself holds the one port it needs. The drive's own `README.txt` says so.
+
+Licenses checked 2026-09-28 against each project's GitHub license field, nixpkgs `meta.license`, and VectorChord's README. The drive edition's rows were checked 2026-10-13 against the build files in that image.

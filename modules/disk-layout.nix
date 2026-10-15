@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Keephaven LLC
 # SPDX-License-Identifier: AGPL-3.0-only
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, keephavenLauncher ? null, ... }:
 
 let
   dataDir = "/var/lib/cloudunit";
@@ -95,6 +95,135 @@ let
       { nativeBuildInputs = [ pkgs.zstd ]; }
       ''zstd -T$NIX_BUILD_CORES ${systemImg} -o $out''
     else systemImg;
+
+  # ----- PC target only (keephaven.platform = "pc") -----
+  isPc = config.keephaven.platform == "pc";
+
+  # Partition 1's GPT type. The Pi 5 firmware can't read a FAT typed ef00
+  # (rpi-eeprom #558), so the Pi keeps 0700; a PC's firmware wants exactly ef00.
+  p1Type = if isPc then "ef00" else "0700";
+  # PC target: ask Windows not to give p1 a drive letter. On the HP, 2026-10-14, a freshly
+  # written drive came up with p1 (the ESP) lettered D: and p4 KEEPHAVEN - the partition that
+  # holds Keephaven.exe - with no letter at all, so an owner opens their new drive and finds
+  # EFI boot folders and no program. p1 was already IsHidden=True and Windows lettered it
+  # anyway. Bit 63 is GPT_BASIC_DATA_ATTRIBUTE_NO_DRIVE_LETTER and Microsoft documents it for
+  # basic-data partitions, so on an ef00 ESP it may well do nothing: set it because it is the
+  # only fix that travels with the drive to every PC, and treat the writer's own letter
+  # assignment as the belt. Proven cold-plugged or not at all.
+  # Pi value is "" so the box images cannot move; verified by eval at the commit.
+  p1NoLetter = if isPc then "-A 1:set:63 " else "";
+
+  # One more partition, entry 4, after the recovery copy: FAT32, typed Microsoft
+  # basic data so Windows gives it a drive letter. It will carry the program that
+  # runs this same drive in a virtual machine on a Windows PC; today it holds a
+  # note. Nothing counts partitions past it: the data partition (created at first
+  # boot, so entry 5 here) is found by label and type GUID, recovery by type GUID,
+  # and only partitions 1 and 2 by number.
+  launcherSizeMiB = 1024;
+  # On a PC this carries the helper and the QEMU it runs Keephaven in, built by
+  # launcher/qemu-windows/launcher.nix. Everywhere else it is a note: the Pi never reads
+  # this partition, and the Pi images must not change because of anything here.
+  launcherFiles =
+    if isPc && keephavenLauncher != null then keephavenLauncher
+    else pkgs.writeTextDir "README.txt" ''
+      Keephaven
+      This drive is a Keephaven. The other parts of it are not readable from
+      Windows. That's expected. Don't format them.
+    '';
+  # ----- the buyer's update code (gate 4a/4b) -----
+  # A fixed-length field the Windows writer overwrites IN PLACE after the verified write: same
+  # byte count, same clusters, so no FAT metadata changes and nothing has to write a filesystem
+  # from Go. The padding is dots because a code may contain '-' but never a '.', so the guest can
+  # strip the padding without ambiguity. Left as all-padding here, which reads as "no code" and
+  # the update gate answers 403 - a drive written without a code says so instead of going quiet.
+  updateCodeFile = pkgs.writeTextDir "Keephaven-code.txt" ''
+    Keephaven - update code
+
+    KEEPHAVEN-UPDATE-CODE:................................................................
+
+    The line above carries the code that came with your download. It tells the
+    Keephaven update server that this drive is yours, and nothing else: it is not
+    a password, and it does not unlock anything on the drive.
+
+    Keephaven writes it here when it puts the system on the drive. You do not
+    need to type it in or keep it anywhere else.
+
+    If you replace this drive, write the new one from your own download again and
+    the code goes with it. If this line is blank or wrong, Keephaven will tell you
+    on its own screen that the code was not accepted - it will not fail quietly.
+  '';
+
+  launcherCommands = ''
+
+
+    truncate -s +$(( (${toString launcherSizeMiB} + 2) * 1024 * 1024 )) "$img"
+    ${pkgs.buildPackages.gptfdisk}/bin/sgdisk \
+      -e \
+      -n 4:0:+${toString launcherSizeMiB}M \
+      -t 4:0700 \
+      -c 4:KEEPHAVEN \
+      "$img"
+    eval $(${pkgs.buildPackages.util-linux}/bin/partx -o START,SECTORS --nr 4 --pairs "$img")
+    truncate -s $((SECTORS * 512)) launcher.fat
+    ${pkgs.buildPackages.dosfstools}/bin/mkfs.vfat -F 32 -n KEEPHAVEN launcher.fat
+    ${pkgs.buildPackages.mtools}/bin/mcopy -s -i launcher.fat ${launcherFiles}/* ::
+    ${lib.optionalString isPc ''
+      ${pkgs.buildPackages.mtools}/bin/mcopy -i launcher.fat ${updateCodeFile}/Keephaven-code.txt ::
+      # The writer finds this field by scanning p4 for the marker, so it has to BE there.
+      ${pkgs.buildPackages.mtools}/bin/mtype -i launcher.fat ::Keephaven-code.txt \
+        | grep -q 'KEEPHAVEN-UPDATE-CODE:[.]\{64\}' \
+        || { echo "the update code field is not on p4 as written" >&2; exit 1; }
+    ''}
+    dd conv=notrunc if=launcher.fat of="$img" bs=4M seek=$((START * 512)) oflag=seek_bytes
+    rm launcher.fat'';
+
+  # The health check below runs a full e2fsck pass over the system partition at every
+  # start. On the Pi's own drive that is a few seconds. A PC version runs from a USB
+  # drive through a hypervisor, where the same pass measured 149 s on a Windows test PC.
+  # So on pc the full pass runs only when a quick look says it is needed: e2fsck without
+  # -f decides from the superblock (a clean file system is skipped, one that was not shut
+  # down cleanly or carries the kernel's error flag gets the whole pass), and when the
+  # superblock can't be read or a read-only mount fails, the pass is forced as before.
+  # The two probes are the script's own, moved ahead of e2fsck and run once: the same
+  # readings choose the check and feed the verdict.
+  # What starts a reflash is unchanged: errors AND (unreadable superblock OR failed mount).
+  # Given up: the logged healthy/fixable split for damage on a clean-flagged, mountable
+  # system partition. That verdict never took an action.
+  # The Pi keeps the text exactly as written: this only rewrites it when platform = "pc".
+  pcCheckFrom = lib.concatStringsSep "\n" [
+    "e2fsck -fn \"$p2\" >/dev/null 2>&1; ec=$?"
+    "    tune2fs -l \"$p2\" >/dev/null 2>&1; sb=$?"
+    "    mkdir -p /cloudunit-probe"
+    "    # ro,norecovery: util-linux mount suppresses journal replay -> write-free."
+    "    if mount -o ro,norecovery \"$p2\" /cloudunit-probe 2>/dev/null; then"
+    "      mok=0; umount /cloudunit-probe 2>/dev/null || true"
+    "    else"
+    "      mok=1"
+    "    fi"
+  ];
+  # The same two probes, run first and once; they choose the check and feed the verdict.
+  pcCheckTo = lib.concatStringsSep "\n" [
+    "tune2fs -l \"$p2\" >/dev/null 2>&1; sb=$?"
+    "    mkdir -p /cloudunit-probe"
+    "    # ro,norecovery: util-linux mount suppresses journal replay -> write-free."
+    "    if mount -o ro,norecovery \"$p2\" /cloudunit-probe 2>/dev/null; then"
+    "      mok=0; umount /cloudunit-probe 2>/dev/null || true"
+    "    else"
+    "      mok=1"
+    "    fi"
+    "    if [ \"$sb\" -ne 0 ] || [ \"$mok\" -ne 0 ]; then"
+    "      pcq=forced; e2fsck -fn \"$p2\" >/dev/null 2>&1; ec=$?"
+    "    else"
+    "      pcq=quick; e2fsck -n \"$p2\" >/dev/null 2>&1; ec=$?"
+    "    fi"
+  ];
+  pcLogFrom = ''mount=$mok verdict=$verdict"'';
+  pcLogTo = ''mount=$mok verdict=$verdict check=$pcq"'';
+  recoveryCheck = text:
+    if !isPc then text
+    else
+      assert lib.hasInfix pcCheckFrom text && lib.hasInfix pcLogFrom text;
+      builtins.replaceStrings [ pcCheckFrom pcLogFrom ] [ pcCheckTo pcLogTo ] text;
 in
 {
   # ----- Phase 1: emit a GPT image -----
@@ -120,7 +249,7 @@ in
     # --mbrtogpt: in-place MBR->GPT conversion (writes a protective MBR).
     # -t1:0700: Microsoft basic data. Pi 5 firmware fails to read a FAT
     # partition typed ef00 (ESP) per rpi-eeprom #558; 0700 has no such report.
-    ${pkgs.buildPackages.gptfdisk}/bin/sgdisk --mbrtogpt -t1:0700 "$img"
+    ${pkgs.buildPackages.gptfdisk}/bin/sgdisk --mbrtogpt -t1:${p1Type} ${p1NoLetter}"$img"
 
     # ----- Phase 3: bake the recovery copy into partition 3 -----
     #
@@ -162,7 +291,7 @@ in
     # Read back p3's real start/length and dd the recovery image into place.
     eval $(${pkgs.buildPackages.util-linux}/bin/partx -o START,SECTORS --nr 3 --pairs "$img")
     dd conv=notrunc,sparse if=${recoveryImg} of="$img" \
-      bs=4M seek=$((START * 512)) oflag=seek_bytes
+      bs=4M seek=$((START * 512)) oflag=seek_bytes${lib.optionalString isPc launcherCommands}
 
     # Verify the resulting GPT is consistent (backup header at device end, no
     # overlaps). sgdisk -v exits non-zero on problems, failing the build.
@@ -266,7 +395,7 @@ in
     copy_bin_and_libs ${pkgs.util-linux}/bin/blockdev
   '';
 
-  boot.initrd.postDeviceCommands = ''
+  boot.initrd.postDeviceCommands = recoveryCheck ''
     (
       set +e
       log() {

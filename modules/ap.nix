@@ -6,6 +6,8 @@ let
   apEnv = "${dataDir}/ap.env";
   hostapdConf = "/run/cloudunit/hostapd.conf";
 
+  isPc = config.keephaven.platform == "pc";
+
   defaultSsid = "Keephaven-Setup";
   defaultPassword = "keephaven";
 
@@ -52,9 +54,14 @@ EOF
   '';
 in
 {
-  networking.interfaces.wlan0.ipv4.addresses = [
-    { address = "192.168.50.1"; prefixLength = 24; }
-  ];
+  # PC target: no setup Wi-Fi yet. Declaring wlan0 there makes every boot wait
+  # five minutes for a radio that may not exist, so the interface is Pi-only,
+  # and the two AP daemons below skip cleanly when there is no wlan0.
+  networking.interfaces = lib.mkIf (!isPc) {
+    wlan0.ipv4.addresses = [
+      { address = "192.168.50.1"; prefixLength = 24; }
+    ];
+  };
   networking.networkmanager.unmanaged = [ "wlan0" ];
 
   systemd.services.cloudunit-ap-bootstrap = {
@@ -93,6 +100,7 @@ EOF
     after = [ "cloudunit-ap-bootstrap.service" "network.target" ];
     wants = [ "cloudunit-ap-bootstrap.service" ];
     unitConfig.RequiresMountsFor = dataDir;
+    unitConfig.ConditionPathExists = lib.mkIf isPc "/sys/class/net/wlan0";
     serviceConfig = {
       Type = "simple";
       ExecStartPre = "${renderScript}";
@@ -159,6 +167,7 @@ EOF
     after = [ "cloudunit-hostapd.service" "network-online.target" "cloudunit-ap-dns.service" ];
     wants = [ "network-online.target" "cloudunit-ap-dns.service" ];
     unitConfig.RequiresMountsFor = dataDir;
+    unitConfig.ConditionPathExists = lib.mkIf isPc "/sys/class/net/wlan0";
   };
 
   networking.firewall.interfaces.wlan0.allowedUDPPorts = [ 53 67 ];

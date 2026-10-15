@@ -1,10 +1,20 @@
 Keephaven
 Copyright (c) 2026 Keephaven LLC.
 
+ONE TREE, THREE EDITIONS
+
+This repository builds Keephaven Home and Keephaven Photos, which run on a
+box, and Keephaven Photos SSD, which runs on a Windows PC from a USB drive
+you write yourself. Same product, same licence, different hardware. The
+drive edition's own parts are launcher/ (the Windows program and the QEMU
+it runs), writer/ (the program that writes a drive and reads it back), and
+modules/pc-hardware.nix.
+
 LICENSE
 
 Keephaven's own code is licensed under the GNU Affero General Public
 License, version 3 only (AGPL-3.0-only). See LICENSE for the full text.
+That covers every edition, the Windows program included.
 
 COMMERCIAL LICENSING
 
@@ -13,10 +23,22 @@ it under separate commercial terms, for example for OEM integration,
 white-label distribution, or products that can't meet the AGPL's
 conditions. Contact: partnerships@keephaven.co
 
-A commercial license covers only Keephaven's own code. The apps and the
-operating system inside the image keep their own licenses (see
-THIRD-PARTY.md). The files in compose/ follow each app's published
-examples, so they are not part of a commercial license either.
+A commercial license covers only Keephaven's own code. The apps, the
+operating system and QEMU keep their own licenses (see THIRD-PARTY.md).
+The files in compose/ follow each app's published examples, so they are
+not part of a commercial license either.
+
+QEMU, AND OUR CHANGE TO IT
+
+The drive edition carries a Windows QEMU binary we built, with one patch of
+our own to QEMU's block/file-win32.c. QEMU is GPL-2.0; a derivative of
+GPL-2.0 code is GPL-2.0 whoever wrote it, and so is the recipe that
+compiles it. So launcher/qemu-windows/win32-hdev-fixed-length.patch and
+launcher/qemu-windows/keephaven-qemu.nix are GPL-2.0-only, cannot be
+relicensed by anyone, and are not offered under other terms. Every drive
+carries QEMU's own licence, the patch in full, the build recipe, the
+package pin, and a written offer of the complete corresponding source good
+for three years.
 
 TRADEMARKS
 

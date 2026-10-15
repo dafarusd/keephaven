@@ -23,6 +23,12 @@ let
   # digest + nix hash (nix-prefetch-docker --arch arm64 --image-digest …) and
   # bump it HERE, then rebuild. There is intentionally no auto-update path; the
   # whole point of pre-baking is a fixed, offline, ship-forever image set.
+  # PC target (keephaven.platform = "pc"): an image may also carry amd64Digest +
+  # amd64NixHash, the linux/amd64 manifest from the SAME upstream index as its
+  # arm64 pin (checked against the registry 2026-10-06: immich v3.0.3 for the two
+  # immich images, the postgres index immich v3.0.3 pins, and for valkey 8.1.3 the
+  # 8-bookworm index immich v2.0.0 pinned, which is where the arm64 pin sits).
+  # Only the four Photos images have one so far.
   images = {
     # Immich v3.0.3 (bumped from v2.7.5, 2026.07.26 release). Unmodified upstream,
     # arm64 digests resolved via skopeo + nix-prefetch-docker. Postgres image
@@ -33,21 +39,29 @@ let
       name = "ghcr.io/immich-app/immich-server";
       arm64Digest = "sha256:b0db439867e1765b785dc0d3fc425fe9d0e8fcd135dba7b2f010151d54af26f7";
       nixHash = "sha256-6Zv55LC66r4xUDW808qt0NrwEbPdq0b3jAEMml1VIvo=";
+      amd64Digest = "sha256:118946756b2274f741be9d301428401be8716024c407b019cd424fa1e6f518e6";
+      amd64NixHash = "sha256-ggIRQ7/H7ROL2f2ruOZK0JCPrZaHHBMRbTFEZUor8p4=";
     };
     immich-machine-learning = {
       name = "ghcr.io/immich-app/immich-machine-learning";
       arm64Digest = "sha256:6b81a6951db55a466de30f0aeb56854b79fdf7adcf943f4d9407a3f26513947c";
       nixHash = "sha256-NpEWNCp4m5BMKUMIA+V14fe6h8sbynFkk0F4+dBTn+I=";
+      amd64Digest = "sha256:fbb2485a6ec1877697d003a7d81d445bd8aea3248a866aa1c3d75b9e134787d0";
+      amd64NixHash = "sha256-AtTrJ1/eWpzrLp4YJC9iQWNirKNevmIW4xYILxHZZIY=";
     };
     valkey = {
       name = "valkey/valkey";
       arm64Digest = "sha256:0e28101f7e5acb939f4e5152b09760b49ba61f278fbf10f6f1d9c45fbbd3f3c7";
       nixHash = "sha256-LCUiOaaGXBA8/enOPW+rYmljjrRMWtefRasFEd8bqb8=";
+      amd64Digest = "sha256:4a7d243f2890e13198440dcfc8d24c9adf9d4fc4092389c89c12a6fda43d3704";
+      amd64NixHash = "sha256-jg3UjUVl58EXlLEngaIGPAlrkfGZiuTwdLu/DmMV40E=";
     };
     immich-postgres = {
       name = "ghcr.io/immich-app/postgres";
       arm64Digest = "sha256:6244e923bfde05b58bc4fc26b21025415c166c6239b6b9886fb0e806dcc99001";
       nixHash = "sha256-c0gk1O2zWRVnnPcIbiIY6G8ELzz6F85wC+CrpovVd68=";
+      amd64Digest = "sha256:b1d33572a9a0634aa6d344077467ad32847812a37fa3859f702952cba22a2f55";
+      amd64NixHash = "sha256-SijCUCqSKJRvPcLHdh9L46OiCrs2Z4tPEI6iW5Gxszw=";
     };
     jellyfin = {
       name = "ghcr.io/jellyfin/jellyfin";
@@ -78,7 +92,19 @@ let
 
   # ----- Derive everything from the pin (one value, rendered everywhere) -----
   # "sha256:" is 7 chars; take the next 12 hex of the digest for the owned tag.
-  digest12 = img: builtins.substring 7 12 img.arm64Digest;
+  # Which architecture this build bakes: arm64 on the Pi, amd64 on the PC target.
+  # An image without an amd64 pin stops a PC build at evaluation, by name.
+  arch = if pkgs.stdenv.hostPlatform.isx86_64 then "amd64" else "arm64";
+  digestOf = img:
+    if arch == "amd64"
+    then img.amd64Digest or (throw "images.nix: ${img.name} has no amd64 pin yet")
+    else img.arm64Digest;
+  hashOf = img: if arch == "amd64" then img.amd64NixHash else img.nixHash;
+  digest12 = img: builtins.substring 7 12 (digestOf img);
+  # The images that have a pin for this architecture. On arm64 that is all of
+  # them. On amd64 it is the ones pinned so far; an edition that bakes one of the
+  # others still stops at evaluation (digestOf above).
+  pinnedHere = lib.filterAttrs (_: img: arch != "amd64" || img ? amd64Digest) images;
   pinnedTag = img: "kh-${digest12 img}";
   pinnedRef = img: "${img.name}:${pinnedTag img}";
 
@@ -87,9 +113,9 @@ let
   # bake is unambiguously the arm64 image regardless of the build host.
   pullArchive = img: pkgs.dockerTools.pullImage {
     imageName = img.name;
-    imageDigest = img.arm64Digest;
-    sha256 = img.nixHash;
-    arch = "arm64";
+    imageDigest = digestOf img;
+    sha256 = hashOf img;
+    inherit arch;
     os = "linux";
     finalImageName = img.name;
     finalImageTag = pinnedTag img;
@@ -115,7 +141,7 @@ let
   envVar = key: "${lib.toUpper (builtins.replaceStrings ["-"] ["_"] key)}_IMAGE";
   imageEnv = pkgs.writeText "cloudunit-images.env"
     (lib.concatStrings
-      (lib.mapAttrsToList (key: img: "${envVar key}=${pinnedRef img}\n") images));
+      (lib.mapAttrsToList (key: img: "${envVar key}=${pinnedRef img}\n") pinnedHere));
 
   # Service -> the image keys its compose stack needs. Drives ONE loader unit per
   # service so each cloudunit-<svc> starts as soon as ITS images are in the docker

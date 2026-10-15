@@ -46,7 +46,10 @@ let
   apEnv = "${dataDir}/ap.env";
   setupFlag = "${dataDir}/.setup-complete";
   # The box's own address on its setup Wi-Fi, read from ap.nix so the two can't drift.
-  apAddress = (builtins.head config.networking.interfaces.wlan0.ipv4.addresses).address;
+  apAddress =
+    if isPc then ""
+    else (builtins.head config.networking.interfaces.wlan0.ipv4.addresses).address;
+  isPc = config.keephaven.platform == "pc";
 
   # Only the two font files, not both font packages, go into the image.
   fonts = pkgs.runCommand "cloudunit-setup-screen-fonts" { } ''
@@ -55,7 +58,73 @@ let
     cp ${pkgs.terminus_font}/share/consolefonts/ter-v32b.psf.gz $out/16x32.psf.gz
   '';
 
-  screenScript = pkgs.writeShellScript "cloudunit-setup-screen" ''
+  # PC target: there is no setup Wi-Fi to join. In a virtual machine the owner is
+  # sitting at the computer that runs it, so the page is on that computer; on a
+  # real PC it is on the home network at the box's wired address. A later
+  # definition of draw() replaces the one in the script, which is left untouched
+  # so the Pi's script stays byte-identical.
+  pcDraw = ''
+    draw() {
+      local -a line=()
+      local b=$'\033[1m' n=$'\033[0m' r where url ip
+      if ${pkgs.systemd}/bin/systemd-detect-virt -q --vm 2>/dev/null; then
+        where='On this computer, open'
+        url='http://localhost'
+      else
+        ip=$(${pkgs.iproute2}/bin/ip -4 -o route get 1.1.1.1 2>/dev/null \
+          | ${pkgs.gnused}/bin/sed -n 's/.* src \([0-9.]*\).*/\1/p')
+        where='On your home network, open'
+        url="http://''${ip:-$host.local}"
+      fi
+      case "$1" in
+        starting)
+          line[2]="''${b}Keephaven is starting...$n"
+          line[4]='This screen updates by itself.'
+          ;;
+        setup)
+          line[2]="''${b}KEEPHAVEN SETUP$n"
+          line[4]="Password:    $b$pw$n"
+          line[6]="$where"
+          line[7]="''${b}$url$n"
+          if [ "$rows" -ge 13 ]; then
+            line[9]='The password leaves this screen'
+            line[10]='when setup is done.'
+          fi
+          ;;
+        done)
+          line[2]="''${b}Keephaven is set up.$n"
+          line[4]="$where"
+          line[5]="''${b}$url$n"
+          ;;
+      esac
+      {
+        if [ "''${2-}" = clear ]; then
+          printf '\033[2J\033[3J'
+        fi
+        for r in 1 2 3 4 5 6 7 8 9 10 11; do
+          printf '\033[%d;1H\033[K\033[%d;4H%s' "$r" "$r" "''${line[r]-}"
+        done
+        if [ "$rows" -gt 11 ]; then
+          printf '\033[12;1H\033[J'
+        fi
+        printf '\033[1;1H'
+      } >&3
+    }
+
+  '';
+  fbAnchor = "FB=/sys/class/graphics/fb0\n";
+
+  screenScript = pkgs.writeShellScript "cloudunit-setup-screen"
+    (if isPc
+     then
+       # replaceStrings is silent when the anchor is gone, and the Pi's Wi-Fi
+       # screen would then win on a PC without a word.
+       assert lib.assertMsg (lib.hasInfix fbAnchor screenText)
+         "setup-screen.nix: the PC screen's splice anchor is missing from the script";
+       builtins.replaceStrings [ fbAnchor ] [ (pcDraw + fbAnchor) ] screenText
+     else screenText);
+
+  screenText = ''
     set -u
     VT=7
     TTY=/dev/tty$VT

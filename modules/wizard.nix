@@ -6,7 +6,77 @@ let
   dataDir = "/var/lib/cloudunit";
   setupFlag = "${dataDir}/.setup-complete";
 
-  wizardApp = pkgs.writeText "cloudunit-wizard.py" ''
+  # PC target: there is no setup Wi-Fi to go back to. Two phrases in the page's
+  # "still reconnecting" hint are swapped; the Pi's page is left byte-identical.
+  isPc = config.keephaven.platform == "pc";
+  piHintA = "if nothing happens in a moment, reconnect to the \" +";
+  piHintB = "\"<b>__KH_SSID__</b> Wi-Fi and open <b>http://192.168.50.1</b>\";";
+  # PC target: the drive has no screen. A box prints its password on the TV at the end of setup
+  # (setup-screen.nix) and on its sticker; a drive writes it to Keephaven-password.txt on the
+  # Windows-visible partition - which the helper locks and dismounts for the whole run, so on the
+  # FIRST run the owner cannot read it until they stop Keephaven once, and they need it as soon
+  # as they open Photos. So the drive's last setup step shows it.
+  #
+  # Only to a browser on the PC the drive is plugged into. Port 80 is reachable from the whole
+  # house and a box never shows its password beyond the TV in the room, so from anywhere else the
+  # page says where to look instead of printing it.
+  #
+  # Anchors carry NO leading spaces and replacements carry their own indentation with explicit
+  # \n: wizardText is a '' block whose common indent is stripped before any of this matches. The
+  # first attempt ignored that and produced `if local:` at module level - which ast.parse accepts
+  # and which would have NameError'd at startup. It was caught by reading the generated file
+  # rather than trusting the build, and the assertion below is what makes a missed anchor loud.
+  pwAnchorA = ''<p>That's everything. When you tap Finish, Keephaven will start up and'';
+  pwAnchorB = "return page.replace(\"__KH_HOST__\", host).replace(\"__KH_SSID__\", ssid)";
+  pwAnchorC = "def render(page):";
+  pwAnchorD = "self._send(render(PAGE))";
+  pwPageA =
+    "<p class=\"muted\">Your password, for Photos and for Settings:\n"
+    + "             <b>__KH_PASSWORD__</b></p>\n"
+    + "          <p>That's everything. When you tap Finish, Keephaven will start up and";
+  pwRenderB =
+    "pw = \"open this page on the computer the drive is plugged into to see it\"\n"
+    + "    if local:\n"
+    + "        pw = \"(not set yet)\"\n"
+    + "        try:\n"
+    + "            with open(os.path.join(DATA_DIR, \"unit.env\")) as f:\n"
+    + "                for line in f:\n"
+    + "                    if line.startswith(\"UNIT_PASSWORD=\"):\n"
+    + "                        pw = line.split(\"=\", 1)[1].strip() or pw\n"
+    + "        except OSError:\n"
+    + "            pass\n"
+    + "    return (page.replace(\"__KH_HOST__\", host).replace(\"__KH_SSID__\", ssid)\n"
+    + "                .replace(\"__KH_PASSWORD__\", pw))";
+  pwRenderC = "def render(page, local=False):";
+  # 10.0.2.2, NOT loopback. The PC's browser reaches the wizard through the helper's
+  # `-nic user,...hostfwd=tcp::80-:80`, and libslirp rewrites the source of a forwarded
+  # connection whose host-side source is loopback or INADDR_ANY to the guest-visible host
+  # address - sotranslate_accept, so->so_faddr = slirp->vhost_addr - which is 10.0.2.2. So the
+  # owner on that very computer arrives as 10.0.2.2 and never as 127.0.0.1, and the first
+  # version of this check could never fire: the feature did nothing at all on a real drive.
+  # A LAN browser comes through the same forward but keeps its real LAN source, which slirp
+  # leaves alone, and no LAN host can hand Windows a packet with a loopback source. So this
+  # address means "from this PC" and nothing else can produce it.
+  # Loopback is deliberately NOT in the test: the only thing inside the guest that connects to
+  # :80 from loopback is captive.nix's wizard-ready probe, and nothing should see the password
+  # by accident.
+  pwRenderD = ''self._send(render(PAGE, self.client_address[0] == "10.0.2.2"))'';
+  wizardApp = pkgs.writeText "cloudunit-wizard.py"
+    (if isPc
+     then
+       assert lib.assertMsg (lib.hasInfix piHintA wizardText && lib.hasInfix piHintB wizardText)
+         "wizard.nix: the PC wording's anchors are missing from the page";
+       assert lib.assertMsg (lib.hasInfix pwAnchorA wizardText && lib.hasInfix pwAnchorB wizardText
+                             && lib.hasInfix pwAnchorC wizardText && lib.hasInfix pwAnchorD wizardText)
+         "wizard.nix: the password step's anchors are missing from the page";
+       builtins.replaceStrings
+         [ piHintA piHintB pwAnchorA pwAnchorB pwAnchorC pwAnchorD ]
+         [ "if nothing happens in a moment, \" +" "\"open <b>http://localhost</b> on this computer again\";"
+           pwPageA pwRenderB pwRenderC pwRenderD ]
+         wizardText
+     else wizardText);
+
+  wizardText = ''
     import http.server, socketserver, os, subprocess, threading, time, json
 
     DATA_DIR = "${dataDir}"

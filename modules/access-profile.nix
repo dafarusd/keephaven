@@ -28,19 +28,12 @@
 let
   cfg = config.keephaven;
 
-  # Dev admin PUBLIC key — YOUR key, not the vendor's. The dev image bakes it so
-  # you can SSH into your own bench box as kh-admin. Put a one-line public key
-  # in keys/dev-admin.pub (gitignored) and `git add -f` it before building dev,
-  # because flakes only see tracked files. Prod never reads this: it is keyless.
-  devKeyFile = ../keys/dev-admin.pub;
+  # Dev admin PUBLIC key. Same keypair the operator already uses on the bench
+  # (so the existing private key keeps working); comment relabelled to mark it
+  # as the dev key. The matching private key is held by the operator and is
+  # NEVER in this repo. Present only on the dev image.
   devAdminKey =
-    if builtins.pathExists devKeyFile
-    then lib.removeSuffix "\n" (builtins.readFile devKeyFile)
-    else throw ''
-      The dev image needs your own SSH public key and none was found.
-      Put it in keys/dev-admin.pub, then run: git add -f keys/dev-admin.pub
-      (The prod image is keyless and does not need this.)
-    '';
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOLsGiFuB3k7trkwYx7m/n05s9c6hKntXAI3Jb/grOjx keephaven-dev";
 in
 {
   options.keephaven.profile = lib.mkOption {
