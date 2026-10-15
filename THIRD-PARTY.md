@@ -1,6 +1,6 @@
 # Third-party software in Keephaven
 
-This repo's own code — the NixOS modules and scripts that turn a Raspberry Pi 5 into a Keephaven box, and the Windows program and writer that run the drive edition on a PC — is AGPL-3.0 (see `LICENSE`).
+This repo's own code - the NixOS modules and scripts that turn a Raspberry Pi 5 into a Keephaven box, and the Windows program and writer that run the drive edition on a PC - is AGPL-3.0 (see `LICENSE`).
 
 The images it builds also contain other people's software. Each keeps its own license, and nothing in Keephaven's license changes that. If you ship boxes or drives built from this, their terms apply to you as well as ours.
 
@@ -53,6 +53,6 @@ The drive edition builds the same system for x86-64 and adds a Windows program t
 
 **QEMU is the one we changed.** `launcher/qemu-windows/win32-hdev-fixed-length.patch` is a change to QEMU's own `block/file-win32.c`; a derivative of GPL-2.0 code is GPL-2.0 whoever wrote it, and so is `keephaven-qemu.nix`, the recipe that compiles it. Every drive carries QEMU's licence, that patch in full, the recipe, the package pin, and a written offer of the complete corresponding source good for three years. Nothing has to be fetched to rebuild the binary: the recipe and its lock are on the drive.
 
-Samba is in the drive image too, although file sharing over the house network does not work while Keephaven runs on a PC — Windows itself holds the one port it needs. The drive's own `README.txt` says so.
+Samba is in the drive image too, although file sharing over the house network does not work while Keephaven runs on a PC - Windows itself holds the one port it needs. The drive's own `README.txt` says so.
 
 Licenses checked 2026-09-28 against each project's GitHub license field, nixpkgs `meta.license`, and VectorChord's README. The drive edition's rows were checked 2026-10-13 against the build files in that image.
