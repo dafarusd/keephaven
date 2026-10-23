@@ -118,7 +118,8 @@ def usage(root):
             except FileNotFoundError:
                 continue
             total += st.st_size
-            n += 1
+            if not f.startswith("."):  # .seq and temp files count toward bytes, not toward the files an agent sees
+                n += 1
             last = max(last, st.st_mtime)
     return total, n, last
 

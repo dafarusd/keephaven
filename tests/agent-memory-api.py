@@ -35,6 +35,7 @@ class API(unittest.TestCase):
         cls.tok_b = run("add", "--data", cls.data, "beta")
         cls.tok_ro = run("add", "--data", cls.data, "reader", "--read-only")
         cls.tok_gone = run("add", "--data", cls.data, "gone")
+        cls.tok_count = run("add", "--data", cls.data, "counter")
         run("revoke", "--data", cls.data, "gone")
         cls.cli = staticmethod(run)
         cls.proc = subprocess.Popen([sys.executable, SERVER, "serve", "--data", cls.data, "--bind", "127.0.0.1",
@@ -215,7 +216,7 @@ class API(unittest.TestCase):
 
     def test_14_owner_list_and_duplicate_add(self):
         names = [a["name"] for a in json.loads(self.cli("list", "--data", self.data))]
-        self.assertEqual(names, ["alpha", "beta", "gone", "reader"])
+        self.assertEqual(names, ["alpha", "beta", "counter", "gone", "reader"])
         r = subprocess.run([sys.executable, SERVER, "add", "--data", self.data, "beta"], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         for bad in ("Beta", "-x", "a" * 40, "a/b"):
@@ -240,6 +241,14 @@ class API(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.data, "agents", "temp", "a.md")))
         self.cli("delete", "--data", self.data, "temp")
         self.assertFalse(os.path.exists(os.path.join(self.data, "agents", "temp")))
+
+    def test_18_file_count_skips_dotfiles(self):
+        self.assertEqual(self.req("PUT", "/v1/files/notes/a.md", b"one", token=self.tok_count)[0], 201)
+        self.assertEqual(self.req("POST", "/v1/journal", {"e": 1}, token=self.tok_count)[0], 201)
+        me = self.req("GET", "/v1/me", token=self.tok_count)[1]
+        self.assertEqual(me["files"], 2)  # the file and the day's journal, not journal/.seq
+        listed = [f["path"] for f in self.req("GET", "/v1/files", token=self.tok_count)[1]["files"]]
+        self.assertEqual(len(listed), me["files"])
 
 
 if __name__ == "__main__":
