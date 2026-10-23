@@ -219,9 +219,29 @@ def make_handler(S):
         def err(self, code, msg):
             self.send_json({"error": msg}, code)
 
-        def body(self, limit):
-            n = int(self.headers.get("Content-Length") or 0)
+        def body(self, limit, what):
+            """The request body, or None after an error reply. Only a plain Content-Length body is
+            accepted: a chunked one would otherwise read as empty and overwrite a file with nothing."""
+            if self.headers.get("Transfer-Encoding"):
+                self.close_connection = True
+                self.err(411, "send the body with a Content-Length header, not Transfer-Encoding")
+                return None
+            raw = self.headers.get("Content-Length")
+            if raw is None:
+                self.close_connection = True
+                self.err(411, "Content-Length is required")
+                return None
+            try:
+                n = int(raw.strip())
+            except ValueError:
+                n = -1
+            if n < 0:
+                self.close_connection = True
+                self.err(400, "Content-Length must be a whole number")
+                return None
             if n > limit:
+                self.close_connection = True  # the unread body is still on the socket
+                self.err(413, what + " over " + ("10 MB" if limit == MAX_BODY else "64 KB"))
                 return None
             return self.rfile.read(n) if n else b""
 
@@ -334,6 +354,12 @@ def make_handler(S):
                 return self.send_json({"hits": hits})
             self.err(404, "unknown endpoint; GET /v1/health lists none, see the docstring in modules/agent-memory.py")
 
+        def do_HEAD(self):
+            # Health checkers often use HEAD; send_json leaves the body out for HEAD.
+            if urllib.parse.urlsplit(self.path).path == "/v1/health":
+                return self.send_json({"ok": True, "service": "keephaven-memory", "version": VERSION})
+            self.err(405, "HEAD only works on /v1/health")
+
         def do_PUT(self):
             u = urllib.parse.urlsplit(self.path)
             g = self.gate()
@@ -350,10 +376,9 @@ def make_handler(S):
                 return self.err(400, "bad path: plain segments of letters, digits, _ . - only")
             if rel == "journal" or rel.startswith("journal/"):
                 return self.err(403, "journal/ is append-only: POST /v1/journal")
-            data = self.body(MAX_BODY)
+            data = self.body(MAX_BODY, "file")
             if data is None:
-                self.close_connection = True  # the unread body is still on the socket
-                return self.err(413, "file over 10 MB")
+                return
             quota = int(a.get("quota_mb", 1024)) * 1024 * 1024
             with S.lock_for(name):
                 old = os.path.getsize(full) if os.path.isfile(full) else 0
@@ -416,10 +441,9 @@ def make_handler(S):
                 return self.err(404, "POST only works on /v1/journal")
             if a.get("read_only"):
                 return self.err(403, "this agent is read-only")
-            raw = self.body(MAX_JOURNAL_ENTRY)
+            raw = self.body(MAX_JOURNAL_ENTRY, "journal entry")
             if raw is None:
-                self.close_connection = True
-                return self.err(413, "journal entry over 64 KB")
+                return
             try:
                 entry = json.loads(raw or b"null")
             except ValueError:

@@ -144,6 +144,55 @@ class API(unittest.TestCase):
         self.assertEqual(s, 413)
         self.assertFalse(os.path.exists(os.path.join(self.data, "agents", "beta", "huge.bin")))
 
+    def raw(self, request):
+        """Send bytes exactly as given; return the status code, or 0 if the server sent nothing."""
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        sock.sendall(request)
+        data = b""
+        try:
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        except socket.timeout:
+            pass
+        sock.close()
+        try:
+            return int(data.split(b" ", 2)[1])
+        except (IndexError, ValueError):
+            return 0
+
+    def test_10b_chunked_refused_and_nothing_written(self):
+        self.req("PUT", "/v1/files/keep.md", b"original", token=self.tok_b)
+        req = (b"PUT /v1/files/keep.md HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + self.tok_b.encode()
+               + b"\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nd\r\nhello chunked\r\n0\r\n\r\n")
+        self.assertEqual(self.raw(req), 411)
+        self.assertEqual(self.req("GET", "/v1/files/keep.md", token=self.tok_b)[1], b"original")
+        req = (b"PUT /v1/files/new-chunked.md HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + self.tok_b.encode()
+               + b"\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+        self.assertEqual(self.raw(req), 411)
+        self.assertFalse(os.path.exists(os.path.join(self.data, "agents", "beta", "new-chunked.md")))
+        req = (b"POST /v1/journal HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + self.tok_b.encode()
+               + b"\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\n{}\r\n0\r\n\r\n")
+        self.assertEqual(self.raw(req), 411)
+
+    def test_10c_missing_or_bad_content_length(self):
+        auth = b"Authorization: Bearer " + self.tok_b.encode() + b"\r\n"
+        for cl, want in ((None, 411), (b"abc", 400), (b"-5", 400), (b"", 400)):
+            head = b"PUT /v1/files/cl.md HTTP/1.1\r\nHost: x\r\n" + auth + b"Connection: close\r\n"
+            if cl is not None:
+                head += b"Content-Length: " + cl + b"\r\n"
+            self.assertEqual(self.raw(head + b"\r\nxyz"), want, cl)
+        self.assertFalse(os.path.exists(os.path.join(self.data, "agents", "beta", "cl.md")))
+        # the server is still up and answering after those
+        self.assertEqual(self.req("GET", "/v1/health")[0], 200)
+
+    def test_10d_head_health(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("HEAD", "/v1/health"); r = c.getresponse(); r.read()
+        self.assertEqual(r.status, 200)
+
     def test_11_if_match(self):
         s, j, h = self.req("PUT", "/v1/files/plan.md", b"v1", token=self.tok_b)
         tag = h["ETag"]
