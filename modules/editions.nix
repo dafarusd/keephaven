@@ -96,8 +96,11 @@ in
   config.keephaven.appsDir = "/var/lib/cloudunit/apps";
 
   config.keephaven.activeApps = editions.${config.keephaven.edition};
+  # Agent memory (modules/agent-memory.nix) is not an edition app: it rides the same
+  # backup when it is switched on, last in the list, matching replication-sender.nix.
   config.keephaven.activeBackupPaths =
-    lib.concatMap (a: appBackup.${a}) config.keephaven.activeApps;
+    lib.concatMap (a: appBackup.${a}) config.keephaven.activeApps
+    ++ lib.optionals config.keephaven.agentMemory.enable [ "agent-memory" ];
 
   # Each edition updates along its OWN feed, so a box is only ever offered images
   # of its own edition. Entertainment stays at the bucket root (the shipped value,

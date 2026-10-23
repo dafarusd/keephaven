@@ -41,6 +41,15 @@ let
   # live with their domain. Values are absolute /nix/store bin paths.
   wrappers = config.cloudunit.wrappers;
 
+  # Settings > Agents (modules/agent-memory.nix). Every splice below renders to "" when agent
+  # memory is off, so the settings app is byte-identical to the image without it.
+  memOn = config.keephaven.agentMemory.enable;
+  agentsFuncs = lib.optionalString memOn (builtins.replaceStrings [ "@ADMIN@" "@PORT@" ]
+    [ config.keephaven.agentMemory.adminWrapper (toString config.keephaven.agentMemory.port) ]
+    (builtins.readFile ./agent-memory-settings.py) + "\n\n");
+  agentsPost = lib.optionalString memOn
+    "elif self.path == \"/agents\":\n            agents_post(self, data)\n\n        ";
+
   applyApConfig = pkgs.writeShellScriptBin "cloudunit-apply-ap-config" ''
     set -euo pipefail
     AP_ENV="${dataDir}/ap.env"
@@ -902,7 +911,7 @@ let
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                 "<button type=\"submit\">Save apps</button></form></div></details>")
 
-    def page(msg="", host=None):
+    ${agentsFuncs}def page(msg="", host=None):
         note = ("<div class='note'>" + html.escape(msg) + "</div>") if msg else ""
         apps_card_html = apps_card()
         support = support_status_line()
@@ -1002,7 +1011,7 @@ let
       {note}
       {update_card}
       {photos_card}
-      {apps_card}
+      {apps_card}${lib.optionalString memOn "{agents_card}"}
       <details class="section" open>
         <summary>Network</summary>
         <div class="card">
@@ -1145,7 +1154,7 @@ let
         }});
       }});
       </script>
-    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html, home=html.escape(home))
+    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html,${lib.optionalString memOn " agents_card=agents_card(),"} home=html.escape(home))
 
     def run(cmd, timeout=None):
         try:
@@ -1625,7 +1634,7 @@ let
                     return
                 self._msg("Support access is now on for " + hours + " hours. It will turn off by itself when the time is up.")
 
-            elif self.path == "/apps":
+            ${agentsPost}elif self.path == "/apps":
                 verdict = auth_check(data)
                 if verdict != "ok":
                     self._msg(auth_deny_msg(verdict, "Your apps were NOT changed."))
@@ -1956,6 +1965,8 @@ in
       { command = wrappers.pairUnpair; options = [ "NOPASSWD" ]; }
       { command = wrappers.tailnetPeers; options = [ "NOPASSWD" ]; }
       { command = wrappers.appSet; options = [ "NOPASSWD" ]; }
+    ] ++ lib.optionals memOn [
+      { command = config.keephaven.agentMemory.adminWrapper; options = [ "NOPASSWD" ]; }
     ] ++ lib.optionals config.keephaven.replication.enable [
       { command = wrappers.replicaSyncNow; options = [ "NOPASSWD" ]; }
       { command = wrappers.replicaTargetStatus; options = [ "NOPASSWD" ]; }

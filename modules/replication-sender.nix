@@ -329,7 +329,7 @@ let
     FSTATE=""
     FMSG=""
     for d in apps-off.list immich/library immich/external jellyfin/media navidrome/media \
-             audiobookshelf/media kavita/media; do
+             audiobookshelf/media kavita/media${lib.optionalString config.keephaven.agentMemory.enable " agent-memory"}; do
       [ -e "${dataDir}/$d" ] || continue
       if ! push "${dataDir}/./$d"; then
         FAILED="$FAILED $d"

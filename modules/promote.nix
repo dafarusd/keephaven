@@ -252,7 +252,17 @@ let
       ${dataDir}/jellyfin/media ${dataDir}/navidrome/media \
       ${dataDir}/audiobookshelf/media ${dataDir}/kavita/media \
       ${dataDir}/immich/external 2>/dev/null || true
-    say files-restored true "Your files are in place. Restoring the photo library next."
+    ${lib.optionalString config.keephaven.agentMemory.enable ''
+    # Agent memory came back root-owned (rsync -rlptD as root). Hand it back to its service;
+    # the registry stays root-owned and group-readable, as the admin wrapper leaves it.
+    if [ -d ${dataDir}/agent-memory ]; then
+      ${pkgs.coreutils}/bin/chown -R kh-memory:kh-memory ${dataDir}/agent-memory || FAILED="$FAILED agent-memory-owner"
+      if [ -f ${dataDir}/agent-memory/agents.json ]; then
+        ${pkgs.coreutils}/bin/chown root:kh-memory ${dataDir}/agent-memory/agents.json || FAILED="$FAILED agent-memory-owner"
+      fi
+      [ -z "$FAILED" ] || echo "promote: agent memory ownership fix failed:$FAILED"
+    fi
+    ''}say files-restored true "Your files are in place. Restoring the photo library next."
 
     # ---- phase 3b: APP PICKER - adopt the main box's picks BEFORE phase 4 lets
     # the services start, so an app the owner had switched off stays off here.

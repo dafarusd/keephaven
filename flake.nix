@@ -63,15 +63,20 @@
         ./modules/provision.nix
         ./modules/finalize.nix
         ./modules/update.nix
+        ./modules/agent-memory.nix
       ];
 
       # profile = dev/prod (access-profile.nix); edition = the app payload
       # (modules/editions.nix). edition defaults to "entertainment", so the two
       # original outputs build exactly as before.
-      mkUnit = { profile, edition ? "entertainment" }: nixos-raspberrypi.lib.nixosSystem {
+      mkUnit = { profile, edition ? "entertainment", extra ? [ ] }: nixos-raspberrypi.lib.nixosSystem {
         specialArgs = inputs;
-        modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ];
+        modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ] ++ extra;
       };
+
+      # Agent memory (modules/agent-memory.nix) switched on. A dedicated output, never an
+      # edit to a tracked file: the shipped outputs keep it off and stay unchanged.
+      memoryOn = [ { keephaven.agentMemory.enable = true; } ];
 
       # The PC target (x86-64, UEFI): Keephaven Photos SSD. Same product modules, a
       # different hardware entry (modules/pc-hardware.nix).
@@ -107,6 +112,10 @@
       nixosConfigurations.cloudunit-photos-dev = mkUnit { profile = "dev"; edition = "photos"; };
       nixosConfigurations.cloudunit-photos-prod = mkUnit { profile = "prod"; edition = "photos"; };
 
+      # Agent memory gate builds: the Entertainment image with agent memory on. Not released.
+      nixosConfigurations.cloudunit-memory-dev = mkUnit { profile = "dev"; extra = memoryOn; };
+      nixosConfigurations.cloudunit-memory-prod = mkUnit { profile = "prod"; extra = memoryOn; };
+
       # Complete bootable images to flash directly to the NVMe.
       packages.aarch64-linux.dev =
         self.nixosConfigurations.cloudunit-dev.config.system.build.sdImage;
@@ -116,6 +125,8 @@
         self.nixosConfigurations.cloudunit-photos-prod.config.system.build.sdImage;
       packages.aarch64-linux.photos-dev =
         self.nixosConfigurations.cloudunit-photos-dev.config.system.build.sdImage;
+      packages.aarch64-linux.memory-dev =
+        self.nixosConfigurations.cloudunit-memory-dev.config.system.build.sdImage;
 
       # The PC target's drive image (Photos edition, dev profile for gating).
       nixosConfigurations.keephaven-pc-photos-dev = mkPc { profile = "dev"; };
@@ -175,6 +186,19 @@
       checks.x86_64-linux.setup-screen = import ./tests/setup-screen.nix {
         pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
       };
+      checks.x86_64-linux.agent-memory = import ./tests/agent-memory.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      };
+
+      # The agent memory server on its own, to try the API on any machine with Nix:
+      #   nix run github:dafarusd/keephaven/agent-memory#agent-memory -- serve --data ./mem --dev-token <token>
+      apps = nixos-raspberrypi.inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system:
+        let p = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.${system}; in {
+          agent-memory = {
+            type = "app";
+            program = "${p.writeShellScript "agent-memory" ''exec ${p.python3}/bin/python3 ${./modules/agent-memory.py} "$@"''}";
+          };
+        });
 
       # The PC target (keephaven.platform = "pc"), Photos edition, taken through
       # setup in a VM with the amd64 app images. Not released; see the test's header.
