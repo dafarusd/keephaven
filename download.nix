@@ -28,7 +28,7 @@
   fileBase ? "keephaven-photos-ssd"
 , productName ? "Keephaven Photos SSD"
 , # Two things in the how-to that differ by edition: its opening paragraph, and the download's size.
-  howtoTried ? "Early release. Free while it's early. If you grab it now it stays free for you.\nLater versions will cost money. It's booted on one PC so far, so keep your\noriginals somewhere else too."
+  howtoTried ? "It's booted on one PC so far, so keep your\noriginals somewhere else too."
 , howtoDownloadGb ? "5"
 }:
 let

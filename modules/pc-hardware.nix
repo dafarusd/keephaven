@@ -96,7 +96,7 @@ in
   # Bumped for the first real update test: a drive flashed from 63f97f1 reports 2026.10.13 and
   # is offered the candidate built from THIS commit, which reports 2026.10.14. The owner bumps
   # this per release and the same string names the published image and its manifest.
-  keephaven.imageVersion = "2026.10.19";
+  keephaven.imageVersion = "2026.10.26";
   # mkForce because the edition already picks a feed (editions.nix sets .../photos/ for a
   # Photos box). A drive is not a Photos box on a Pi, so it takes its own path regardless of
   # edition — that separation is the whole point.
