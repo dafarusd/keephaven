@@ -1,6 +1,7 @@
 #!/bin/sh
 # cloudunit-apply-password NEW_PASSWORD
-# Changes the account password across all 6 services + Samba.
+# Changes the account password across the apps this image has and the owner hasn't
+# switched off, + Samba.
 # Idempotent / re-runnable: per service, if NEW already works -> skip; else
 # authenticate with OLD and change. Per-service auto-retry (3x). Reports
 # per-service result. unit.env is NEVER modified (sticker/factory record);
@@ -16,6 +17,10 @@ USERNAME="keephaven"
 CURL="curl"
 DOCKER="docker"
 SMBPASSWD="smbpasswd"
+# Filled in by settings.nix from keephaven.activeApps / keephaven.appsDir. A Photos box has
+# only Immich: asking five missing apps for a password change failed every change (2026-10-24).
+ACTIVE_APPS="@ACTIVE_APPS@"
+APPS_DIR="@APPS_DIR@"
 
 NEW="${1-}"
 
@@ -49,15 +54,21 @@ abs_set() { tok=$($CURL -s -X POST "http://localhost:13378/login" -H "Content-Ty
 
 freshrss_set() { $DOCKER exec freshrss php /var/www/FreshRSS/cli/update-user.php --user "$USERNAME" --password "$2" >/dev/null 2>&1 || return 1; $DOCKER exec freshrss bash /var/www/FreshRSS/cli/access-permissions.sh >/dev/null 2>&1 || true; return 0; }
 
+# has APP: in this image and not switched off by the owner. A switched-off app is skipped and
+# keeps the old password until the password is changed again with it switched on.
+has() { case " $ACTIVE_APPS " in *" $1 "*) [ ! -e "$APPS_DIR/$1.off" ] || { echo "  $2: skipped (switched off)"; return 1; } ;; *) return 1 ;; esac; }
+
 change_service() { name="$1"; login_ok="$2"; setfn="$3"; if "$login_ok" "$NEW"; then echo "  $name: already updated"; return 0; fi; i=1; while [ "$i" -le 3 ]; do if "$setfn" "$OLD" "$NEW"; then echo "  $name: updated"; return 0; fi; i=$((i+1)); sleep 3; done; echo "  $name: FAILED"; FAILED="$FAILED $name"; return 1; }
 
 echo "Applying new password across services..."
-change_service "Immich" immich_login_ok immich_set
-change_service "Jellyfin" jelly_login_ok jelly_set
-change_service "Navidrome" navi_login_ok navi_set
-change_service "Kavita" kavita_login_ok kavita_set
-change_service "Audiobookshelf" abs_login_ok abs_set
-if freshrss_set "$OLD" "$NEW"; then echo "  FreshRSS: updated"; else echo "  FreshRSS: FAILED"; FAILED="$FAILED FreshRSS"; fi
+has immich Immich && change_service "Immich" immich_login_ok immich_set
+has jellyfin Jellyfin && change_service "Jellyfin" jelly_login_ok jelly_set
+has navidrome Navidrome && change_service "Navidrome" navi_login_ok navi_set
+has kavita Kavita && change_service "Kavita" kavita_login_ok kavita_set
+has audiobookshelf Audiobookshelf && change_service "Audiobookshelf" abs_login_ok abs_set
+if has freshrss FreshRSS; then
+  if freshrss_set "$OLD" "$NEW"; then echo "  FreshRSS: updated"; else echo "  FreshRSS: FAILED"; FAILED="$FAILED FreshRSS"; fi
+fi
 
 if printf '%s\n%s\n' "$NEW" "$NEW" | $SMBPASSWD -s "$USERNAME" >/dev/null 2>&1; then echo "  Samba: updated"; else echo "  Samba: FAILED"; FAILED="$FAILED Samba"; fi
 

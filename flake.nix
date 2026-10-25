@@ -63,14 +63,15 @@
         ./modules/provision.nix
         ./modules/finalize.nix
         ./modules/update.nix
+        ./modules/agent-memory.nix
       ];
 
       # profile = dev/prod (access-profile.nix); edition = the app payload
       # (modules/editions.nix). edition defaults to "entertainment", so the two
       # original outputs build exactly as before.
-      mkUnit = { profile, edition ? "entertainment" }: nixos-raspberrypi.lib.nixosSystem {
+      mkUnit = { profile, edition ? "entertainment", extra ? [ ] }: nixos-raspberrypi.lib.nixosSystem {
         specialArgs = inputs;
-        modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ];
+        modules = sharedModules ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ] ++ extra;
       };
 
       # The PC target (x86-64, UEFI): Keephaven Photos SSD. Same product modules, a
@@ -90,11 +91,25 @@
             # null on a dirty tree; the drive then says so in its AGPL notice and the flash
             # check refuses it as a customer drive.
             rev = self.rev or null;
+            agentMemory = edition == "agent-memory";
+            versionOverride = if edition == "agent-memory" then agentmemSsdVersion else null;
           };
         };
         modules = [ ./modules/pc-hardware.nix ] ++ productModules
-          ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ] ++ extraModules;
+          ++ [ { keephaven.profile = profile; keephaven.edition = edition; } ]
+          ++ nixos-raspberrypi.inputs.nixpkgs.lib.optional (edition == "agent-memory")
+               { keephaven.imageVersion = nixos-raspberrypi.inputs.nixpkgs.lib.mkForce agentmemSsdVersion; }
+          ++ extraModules;
       };
+
+      # Agent memory (modules/agent-memory.nix) switched on. A dedicated output, never an
+      # edit to a tracked file: the shipped outputs above keep it off and stay unchanged.
+      memoryOn = [ { keephaven.agentMemory.enable = true; } ];
+      # The Agent Memory editions' own release line (Pi and drive); the first is 2026.10.24.
+      agentmemVersion = "2026.10.24";
+      # The drive's own line from 2026.10.25: the 2026.10.24 drive could not look up any name
+      # (modules/ap.nix), and a fixed build never reuses a version string.
+      agentmemSsdVersion = "2026.10.25";
     in
     {
       # Twin systems from one source tree. dev = keyed + SSH on LAN (testing);
@@ -107,6 +122,15 @@
       nixosConfigurations.cloudunit-photos-dev = mkUnit { profile = "dev"; edition = "photos"; };
       nixosConfigurations.cloudunit-photos-prod = mkUnit { profile = "prod"; edition = "photos"; };
 
+      # Agent memory gate builds: the Entertainment image with agent memory on.
+      nixosConfigurations.cloudunit-memory-dev = mkUnit { profile = "dev"; extra = memoryOn; };
+      nixosConfigurations.cloudunit-memory-prod = mkUnit { profile = "prod"; extra = memoryOn; };
+      # Agent Memory edition: no apps, agent memory on (modules/editions.nix). Named apart from
+      # cloudunit-memory-*, which is the banked Home build with memory switched on.
+      # Its own release line; the first is 2026.10.24.
+      nixosConfigurations.cloudunit-agentmem-dev = mkUnit { profile = "dev"; edition = "agent-memory"; extra = [ { keephaven.imageVersion = agentmemVersion; } ]; };
+      nixosConfigurations.cloudunit-agentmem-prod = mkUnit { profile = "prod"; edition = "agent-memory"; extra = [ { keephaven.imageVersion = agentmemVersion; } ]; };
+
       # Complete bootable images to flash directly to the NVMe.
       packages.aarch64-linux.dev =
         self.nixosConfigurations.cloudunit-dev.config.system.build.sdImage;
@@ -116,6 +140,14 @@
         self.nixosConfigurations.cloudunit-photos-prod.config.system.build.sdImage;
       packages.aarch64-linux.photos-dev =
         self.nixosConfigurations.cloudunit-photos-dev.config.system.build.sdImage;
+      packages.aarch64-linux.memory-dev =
+        self.nixosConfigurations.cloudunit-memory-dev.config.system.build.sdImage;
+      packages.aarch64-linux.memory-prod =
+        self.nixosConfigurations.cloudunit-memory-prod.config.system.build.sdImage;
+      packages.aarch64-linux.agentmem-dev =
+        self.nixosConfigurations.cloudunit-agentmem-dev.config.system.build.sdImage;
+      packages.aarch64-linux.agentmem-prod =
+        self.nixosConfigurations.cloudunit-agentmem-prod.config.system.build.sdImage;
 
       # The PC target's drive image (Photos edition, dev profile for gating).
       nixosConfigurations.keephaven-pc-photos-dev = mkPc { profile = "dev"; };
@@ -137,6 +169,34 @@
       # pointed at the laptop feed without a 36 GB rebuild. NEVER flash this for anyone else and
       # never name it as a ship artifact: it differs from pc-photos-prod by this one option, which
       # is the point - `nix store diff-closures` between them must show only the update scripts.
+      # Agent Memory edition on a drive (and in a VM): no apps, agent memory on. Not released.
+      nixosConfigurations.keephaven-pc-agentmem-dev = mkPc { profile = "dev"; edition = "agent-memory"; };
+      packages.x86_64-linux.pc-agentmem-dev =
+        self.nixosConfigurations.keephaven-pc-agentmem-dev.config.system.build.sdImage;
+      nixosConfigurations.keephaven-pc-agentmem-prod = mkPc { profile = "prod"; edition = "agent-memory"; };
+      packages.x86_64-linux.pc-agentmem-prod =
+        self.nixosConfigurations.keephaven-pc-agentmem-prod.config.system.build.sdImage;
+      # The Agent Memory SSD's download: its writer and setup (editions/agent-memory/*.nix patch the
+      # Photos SSD's programs without touching their folders) and the bundle.
+      packages.x86_64-linux.agentmem-ssd-writer = import ./editions/agent-memory/writer.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        imageVersion = self.nixosConfigurations.keephaven-pc-agentmem-prod.config.keephaven.imageVersion;
+      };
+      packages.x86_64-linux.agentmem-ssd-setup = import ./editions/agent-memory/setup.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        imageVersion = self.nixosConfigurations.keephaven-pc-agentmem-prod.config.keephaven.imageVersion;
+      };
+      packages.x86_64-linux.pc-agentmem-download = import ./download.nix {
+        nixpkgs = nixos-raspberrypi.inputs.nixpkgs;
+        image = self.packages.x86_64-linux.pc-agentmem-prod;
+        writer = self.packages.x86_64-linux.agentmem-ssd-writer;
+        imageVersion = self.nixosConfigurations.keephaven-pc-agentmem-prod.config.keephaven.imageVersion;
+        fileBase = "keephaven-agent-memory-ssd";
+        productName = "Keephaven Agent Memory SSD";
+        howtoTried = "So far it's only run in a virtual machine on one PC, so keep a copy of\nanything that matters somewhere else too.";
+        howtoDownloadGb = "3";
+      };
+
       nixosConfigurations.keephaven-pc-photos-bench =
         mkPc { profile = "prod"; extraModules = [ { keephaven.allowUpdateUrlOverride = true; } ]; };
       packages.x86_64-linux.pc-photos-bench =
@@ -216,6 +276,13 @@
           touch $out
         '';
 
+      # Two Agent Memory edition boxes and a private headscale: pairing, the nightly sync, promote
+      # and factory reset, with the real wrappers. See the test's header for what it asserts.
+      checks.x86_64-linux.agentmem-backup-pair = import ./tests/agentmem-backup-pair.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+        inherit productModules;
+      };
+
       checks.x86_64-linux.pc-photos = import ./tests/pc-photos.nix {
         pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
         inherit productModules;
@@ -239,5 +306,19 @@
             "the launcher's parsed version ${l.imageVersion} is not the drive's ${shipped}";
           l;
       };
+
+      checks.x86_64-linux.agent-memory = import ./tests/agent-memory.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      };
+
+      # The memory server on its own, for an agent to try the API on any machine with Nix:
+      #   nix run github:dafarusd/keephaven#agent-memory -- serve --data ./mem --dev-token <token>
+      apps = nixos-raspberrypi.inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system:
+        let p = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.${system}; in {
+          agent-memory = {
+            type = "app";
+            program = "${p.writeShellScript "agent-memory" ''exec ${p.python3}/bin/python3 ${./modules/agent-memory.py} "$@"''}";
+          };
+        });
     };
 }

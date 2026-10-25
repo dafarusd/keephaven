@@ -22,6 +22,13 @@
   # Absent on a dirty tree, and then the drive says so and verify-written-drive.sh refuses it
   # as a customer drive.
   rev ? null
+, # The Agent Memory edition's drive also passes the agent API's port, 8790, through to the
+  # guest and opens it in the firewall. A patch applied only for that edition, so the Photos
+  # drive's helper is built from exactly the same source as before (2026-10-24).
+  agentMemory ? false
+, # The drive edition's own version when it isn't the Photos SSD's (which is read out of
+  # pc-hardware.nix below). flake.nix passes the Agent Memory SSD's.
+  versionOverride ? null
 }:
 let
   agplRev = if rev == null then "UNCOMMITTED-DEVELOPMENT-BUILD-NOT-FOR-RELEASE" else rev;
@@ -35,7 +42,7 @@ let
   verLine = lib.findFirst (l: lib.hasInfix ''keephaven.imageVersion = "'' l) null
               (lib.splitString "\n" pcHwText);
   verMatch = if verLine == null then null else builtins.match ''.*"([0-9.]+)".*'' verLine;
-  imageVersion = if verMatch == null
+  imageVersion = if versionOverride != null then versionOverride else if verMatch == null
     then throw "launcher.nix: cannot read keephaven.imageVersion out of modules/pc-hardware.nix"
     else builtins.head verMatch;
   # Still exposed through passthru for the tests, but no longer printed on the drive: his own
@@ -118,7 +125,7 @@ let
     [ -s $out ] || { echo "the list came out empty" >&2; exit 1; }
   '';
 
-  helper = host.stdenv.mkDerivation {
+  helper = host.stdenv.mkDerivation ({
     pname = "keephaven-windows-helper";
     version = "1";
     src = ../windows;
@@ -129,7 +136,7 @@ let
         -ldflags "-s -w -X main.qemuDigests=$(cat ${digests}) -X main.version=${imageVersion}" -o Keephaven.exe .
     '';
     installPhase = ''mkdir -p $out && cp Keephaven.exe $out/'';
-  };
+  } // host.lib.optionalAttrs agentMemory { patches = [ ./agent-memory-port.patch ]; });
 
   # Read the list back out of the helper that was just built and check it against the files
   # that are actually going on the drive. If those ever drift apart the helper refuses the

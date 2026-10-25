@@ -12,12 +12,15 @@
 # something — fix it, don't lower the bar.
 { config, lib, ... }:
 let
-  # Canonical order: Immich first (every edition has it), then the five media apps
+  # Canonical order: Immich first (Home and Photos have it), then the five media apps
   # in the order most modules already use. A module whose own order differs (samba
   # puts Photos last) must filter ITS list by membership, not replace it with this.
   editions = {
     entertainment = [ "immich" "jellyfin" "navidrome" "audiobookshelf" "kavita" "freshrss" ];
     photos = [ "immich" ];
+    # No apps at all: the box basics plus agent memory, which this edition switches on
+    # (below). Its own release and feed, decided by Dafarus 2026-10-24.
+    "agent-memory" = [ ];
   };
 
   # Every app any edition can name.
@@ -48,6 +51,7 @@ in
     description = ''
       Which edition this image builds — the app payload on the shared base.
       "entertainment" is today's box (the six media apps). "photos" is Immich only.
+      "agent-memory" has no apps and switches agent memory on.
       Default is entertainment, so an unset value builds exactly today's image.
     '';
   };
@@ -96,8 +100,12 @@ in
   config.keephaven.appsDir = "/var/lib/cloudunit/apps";
 
   config.keephaven.activeApps = editions.${config.keephaven.edition};
+  config.keephaven.agentMemory.enable = lib.mkIf (config.keephaven.edition == "agent-memory") true;
+  # Agent memory (modules/agent-memory.nix) is not an edition app: it rides the same
+  # backup when it is switched on, last in the list, matching replication-sender.nix.
   config.keephaven.activeBackupPaths =
-    lib.concatMap (a: appBackup.${a}) config.keephaven.activeApps;
+    lib.concatMap (a: appBackup.${a}) config.keephaven.activeApps
+    ++ lib.optionals config.keephaven.agentMemory.enable [ "agent-memory" ];
 
   # Each edition updates along its OWN feed, so a box is only ever offered images
   # of its own edition. Entertainment stays at the bucket root (the shipped value,

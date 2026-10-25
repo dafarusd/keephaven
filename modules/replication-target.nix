@@ -95,6 +95,11 @@ let
         SRCVER="$(${pkgs.gawk}/bin/awk -F= '/^source_version=/{print $2; exit}' "''${NEWESTF%.sql.zst}.meta" 2>/dev/null || echo "")"
       fi
     fi
+    # A source with no Immich sends no dumps. Every run still rewrites apps-off.list and
+    # sends it, so its time is when the last backup arrived (2026-10-24).
+    if [ -z "''${NEWEST:-}" ] && [ -f ${landing}/apps-off.list ]; then
+      NEWEST="$($co/date -u -r ${landing}/apps-off.list '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")"
+    fi
     USED="$($co/du -sh ${landing} 2>/dev/null | $co/cut -f1)"
     FREE="$($co/df -Ph ${landing} 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $4}')"
     PCT="$($co/df -Ph ${landing} 2>/dev/null | ${pkgs.gawk}/bin/awk 'NR==2{print $5}')"

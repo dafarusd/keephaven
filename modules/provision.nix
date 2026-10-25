@@ -517,11 +517,12 @@ let
       -H "Authorization: Bearer $TOKEN" 2>/dev/null || true
     echo "immich-scan: queued scan for library $LIBID"
   '';
+  hasImmich = builtins.elem "immich" config.keephaven.activeApps;
 in
 {
-  # Edition switch (modules/editions.nix): the five media provisioners run only
-  # when the edition includes them. Immich's provisioner and its external-library
-  # scan are always present. For entertainment all are active, so this is identical.
+  # Edition switch (modules/editions.nix): each provisioner runs only when the edition
+  # includes its app; Immich's scan timer and drop-in watcher with it. Home and Photos
+  # have Immich, so for them this is identical; the Agent Memory edition has no apps.
   systemd.services =
     lib.optionalAttrs (builtins.elem "jellyfin" config.keephaven.activeApps)
       (mkProvision { name = "jellyfin"; after = [ "cloudunit-jellyfin.service" ]; script = jellyfinProvision; })
@@ -533,8 +534,8 @@ in
       (mkProvision { name = "kavita"; after = [ "cloudunit-kavita.service" ]; script = kavitaProvision; })
     // lib.optionalAttrs (builtins.elem "audiobookshelf" config.keephaven.activeApps)
       (mkProvision { name = "audiobookshelf"; after = [ "cloudunit-audiobookshelf.service" ]; script = audiobookshelfProvision; })
-    // (mkProvision { name = "immich"; after = [ "cloudunit-immich.service" ]; script = immichProvision; })
-    // {
+    // lib.optionalAttrs hasImmich (mkProvision { name = "immich"; after = [ "cloudunit-immich.service" ]; script = immichProvision; })
+    // lib.optionalAttrs hasImmich {
       cloudunit-immich-scan = {
         description = "Cloud Unit - Immich external-library scan trigger";
         after = [ "cloudunit-immich.service" ];
@@ -550,7 +551,7 @@ in
       };
     };
 
-  systemd.timers.cloudunit-immich-scan = {
+  systemd.timers = lib.optionalAttrs hasImmich { cloudunit-immich-scan = {
     description = "Cloud Unit - periodic Immich external-library scan";
     wantedBy = [ "timers.target" ];
     timerConfig = {
@@ -558,7 +559,7 @@ in
       OnUnitActiveSec = "10min";
       Unit = "cloudunit-immich-scan.service";
     };
-  };
+  }; };
 
   # Near-instant import: watch the Samba "Photos" drop-in dir and fire the SAME
   # scan the moment a file lands, so a fresh box imports the customer's very
@@ -570,12 +571,12 @@ in
   # self-gates on .setup-complete) -- no Immich watcher, no version-fragile
   # system-config. The timer stays as the fallback and also covers drops into
   # nested subdirs, which a single-directory path watch does not see.
-  systemd.paths.cloudunit-immich-watch = {
+  systemd.paths = lib.optionalAttrs hasImmich { cloudunit-immich-watch = {
     description = "Cloud Unit - trigger Immich scan when a file lands in the Photos drop-in";
     wantedBy = [ "multi-user.target" ];
     pathConfig = {
       PathChanged = "${dataDir}/immich/external";
       Unit = "cloudunit-immich-scan.service";
     };
-  };
+  }; };
 }

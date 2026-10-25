@@ -61,7 +61,24 @@ let
   # :80 from loopback is captive.nix's wizard-ready probe, and nothing should see the password
   # by accident.
   pwRenderD = ''self._send(render(PAGE, self.client_address[0] == "10.0.2.2"))'';
-  wizardApp = pkgs.writeText "cloudunit-wizard.py"
+  # The Agent Memory edition has no Photos: the same setup page with words that fit it. The
+  # needles are checked on every edition (replaceStrings is silent when one is missing) and
+  # applied only without Immich, so Home and Photos are unchanged. Runs after the PC swaps,
+  # whose password line names Photos.
+  noPhotosNeedles =
+    [ "Your photos, movies, music and files live here on your"
+      "Preparing photos, media and files" ]
+    ++ lib.optional isPc "Your password, for Photos and for Settings:";
+  noPhotosWords = text0:
+    let text = lib.foldl' (acc: n: assert lib.assertMsg (builtins.replaceStrings [ n ] [ "" ] text0 != text0)
+          "wizard.nix: the setup page no longer contains \"${n}\"; update the needle"; acc) text0 noPhotosNeedles; in
+    if builtins.elem "immich" config.keephaven.activeApps then text
+    else builtins.replaceStrings noPhotosNeedles
+      ([ "Your AI agents' memory and your files live here on your"
+         "Preparing agent memory" ]
+       ++ lib.optional isPc "Your password, for Settings:")
+      text;
+  wizardApp = pkgs.writeText "cloudunit-wizard.py" (noPhotosWords
     (if isPc
      then
        assert lib.assertMsg (lib.hasInfix piHintA wizardText && lib.hasInfix piHintB wizardText)
@@ -74,7 +91,7 @@ let
          [ "if nothing happens in a moment, \" +" "\"open <b>http://localhost</b> on this computer again\";"
            pwPageA pwRenderB pwRenderC pwRenderD ]
          wizardText
-     else wizardText);
+     else wizardText));
 
   wizardText = ''
     import http.server, socketserver, os, subprocess, threading, time, json

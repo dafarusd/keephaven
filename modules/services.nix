@@ -155,11 +155,10 @@ let
     };
 in
 {
-  # Immich is in every edition, so its compose files are unconditional. The five
-  # media apps' compose files are emitted only when the edition includes them
-  # (modules/editions.nix). For entertainment all five are active, so the merged
-  # set is identical to before.
-  environment.etc = {
+  # Each app's compose files are emitted only when the edition includes it
+  # (modules/editions.nix). Immich is in Home and Photos, so for them the merged set is
+  # identical to before; the Agent Memory edition has no apps at all.
+  environment.etc = lib.optionalAttrs (builtins.elem "immich" config.keephaven.activeApps) {
     "cloudunit/compose/immich/docker-compose.yml".source = ../compose/immich/docker-compose.yml;
     "cloudunit/compose/immich/.env.template".source = ../compose/immich/.env.template;
   }
@@ -184,8 +183,9 @@ in
   cloudunit.wrappers.appSet = "${appSet}/bin/cloudunit-app-set";
 
   systemd.services =
-    (mkService { name = "immich"; description = "Cloud Unit - Immich photo service"; needsEnv = true; })
-    // (mkBootstrap { name = "immich"; })
+    lib.optionalAttrs (builtins.elem "immich" config.keephaven.activeApps)
+      ((mkService { name = "immich"; description = "Cloud Unit - Immich photo service"; needsEnv = true; })
+       // (mkBootstrap { name = "immich"; }))
     // lib.optionalAttrs (builtins.elem "jellyfin" config.keephaven.activeApps)
        (mkService { name = "jellyfin"; description = "Cloud Unit - Jellyfin media server"; needsEnv = false; })
     // lib.optionalAttrs (builtins.elem "navidrome" config.keephaven.activeApps)
@@ -212,7 +212,7 @@ in
        })
     // lib.optionalAttrs (builtins.elem "freshrss" config.keephaven.activeApps)
        (mkService { name = "freshrss"; description = "Cloud Unit - FreshRSS"; needsEnv = false; })
-    // {
+    // lib.optionalAttrs (builtins.elem "immich" config.keephaven.activeApps) {
       # Ensure the Immich External Library drop-in dir exists and is owned by the
       # share user BEFORE the immich container bind-mounts it. If the dir is absent
       # when docker mounts it, docker auto-creates it as ROOT and the Samba "Photos"

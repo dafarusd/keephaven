@@ -1,0 +1,38 @@
+--- a/main.go
++++ b/main.go
+@@ -122,7 +122,7 @@
+ 	minHostMemMiB            = 7600 // an "8 GB" PC reports a little under 8192
+ )
+ 
+-var guestPorts = []int{80, 8888, 2283}
++var guestPorts = []int{80, 8888, 2283, 8790}
+ 
+ var (
+ 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
+@@ -1152,7 +1152,7 @@
+ 		}
+ 	}
+ 	if total < minHostMemMiB {
+-		stop("this PC has %d MB of memory. Keephaven Photos needs a PC with 8 GB.", total)
++		stop("this PC has %d MB of memory. Keephaven needs a PC with 8 GB.", total)
+ 	}
+ 	checkQemu(runDir)
+ 	ver, _ := run(qemu, "--version")
+@@ -1194,7 +1194,7 @@
+ 
+ 	// ---- the firewall: let other devices on the home network in ----
+ 	run(sys32("netsh.exe"), "advfirewall", "firewall", "delete", "rule", "name=Keephaven")
+-	ports := strings.Join(append([]string{"80", "8888", "2283"}, testFirewallPorts()...), ",")
++	ports := strings.Join(append([]string{"80", "8888", "2283", "8790"}, testFirewallPorts()...), ",")
+ 	// Named for QEMU alone, so the opening belongs to this program and not to whatever else
+ 	// might listen on those ports later. It is taken away again when Keephaven stops.
+ 	out, err := run(sys32("netsh.exe"), "advfirewall", "firewall", "add", "rule", "name=Keephaven", "dir=in", "action=allow",
+@@ -1370,7 +1370,7 @@
+ 			"-m", strconv.Itoa(guestMemMiB), "-smp", strconv.Itoa(t.smp),
+ 			"-drive", "if=pflash,format=raw,readonly=on,file=" + filepath.Join(qdir, "OVMF_CODE.fd"),
+ 			"-drive", "if=pflash,format=raw,file=" + vars,
+-			"-nic", "user,model=virtio-net-pci,hostfwd=tcp::80-:80,hostfwd=tcp::8888-:8888,hostfwd=tcp::2283-:2283",
++			"-nic", "user,model=virtio-net-pci,hostfwd=tcp::80-:80,hostfwd=tcp::8888-:8888,hostfwd=tcp::2283-:2283,hostfwd=tcp::8790-:8790",
+ 			"-display", map[bool]string{false: t.display, true: "none"}[t.nodisplay], "-vga", "std",
+ 			"-serial", "file:" + serial,
+ 			"-chardev", "pipe,id=khqmp,path=" + qmpName, "-mon", "chardev=khqmp,mode=control",

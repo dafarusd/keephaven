@@ -42,10 +42,15 @@ let
   # The edition's apps (edition switch, modules/editions.nix). For entertainment
   # this is the same six in the same order, so the rendered unit is unchanged.
   services = config.keephaven.activeApps;
+  # Agent memory (modules/agent-memory.nix) goes down and comes back with the apps when it
+  # is on; off, both lists render exactly as before.
+  memOn = config.keephaven.agentMemory.enable;
   stopAll = lib.concatMapStringsSep "\n    "
-    (s: "$SYSTEMCTL stop cloudunit-${s}.service 2>/dev/null || true") services;
+    (s: "$SYSTEMCTL stop cloudunit-${s}.service 2>/dev/null || true") services
+    + lib.optionalString memOn "\n    $SYSTEMCTL stop keephaven-agent-memory.service 2>/dev/null || true";
   startAll = lib.concatMapStringsSep "\n    "
-    (s: "$SYSTEMCTL start --no-block cloudunit-${s}.service 2>/dev/null || true") services;
+    (s: "$SYSTEMCTL start --no-block cloudunit-${s}.service 2>/dev/null || true") services
+    + lib.optionalString memOn "\n    $SYSTEMCTL start --no-block keephaven-agent-memory.service 2>/dev/null || true";
 
   enable = pkgs.writeShellScriptBin "cloudunit-backup-mode-enable" ''
     set -u

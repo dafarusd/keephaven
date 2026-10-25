@@ -6,6 +6,10 @@ let
   photosStatusBin = config.cloudunit.wrappers.photosSigninStatus;
   dataDir = "/var/lib/cloudunit";
   setupFlag = "${dataDir}/.setup-complete";
+  # Wording for an edition with no Photos (the Agent Memory edition). With Immich in the
+  # image every splice renders the shipped words, so Home and Photos are unchanged.
+  hasImmich = builtins.elem "immich" config.keephaven.activeApps;
+  ifPhotos = yes: no: if hasImmich then yes else no;
   # The tiles, as data, so the edition switch can drop the ones an edition does
   # not include (modules/editions.nix). Order and formatting reproduce the former
   # hard-coded JS exactly, so for entertainment (all six active) the rendered page
@@ -17,6 +21,9 @@ let
     { name = "Audiobooks"; desc = "AudioBookshelf"; port = 13378; health = "/healthcheck"; key = "audiobookshelf"; }
     { name = "Books"; desc = "Kavita"; port = 5001; health = "/api/health"; key = "kavita"; }
     { name = "News"; desc = "FreshRSS"; port = 8081; health = "/"; key = "freshrss"; }
+    # Not an edition app: shown when agent memory is switched on. Its port answers / with a
+    # page that points the owner at Settings > Agents.
+    { name = "Agent memory"; desc = "For your AI agents"; port = 8790; health = "/v1/health"; key = "agent-memory"; }
   ];
   renderTile = t:
     ''{ name: "${t.name}", desc: "${t.desc}", port: ${toString t.port}, health: "${t.health}", ''
@@ -26,7 +33,8 @@ let
   # indent (the separator's spaces are a literal interpolated value, so they are
   # NOT stripped — they must equal the post-strip indent of the surrounding JS).
   tilesJs = lib.concatMapStringsSep ",\n      " renderTile
-    (builtins.filter (t: builtins.elem t.key config.keephaven.activeApps) tilesMeta);
+    (builtins.filter (t: builtins.elem t.key config.keephaven.activeApps
+      || (t.key == "agent-memory" && config.keephaven.agentMemory.enable)) tilesMeta);
 
   # Post-setup dashboard. Serves a tile page on LAN port 80. Tiles start
   # disabled with a spinner and only become clickable once each service's
@@ -50,8 +58,8 @@ let
   # did exactly that: proved in the generated file, never on a screen.
   pwNoteAnchor = "if(!d || !d.promoted){ el.innerHTML = \"\"; return; }";
   pwNotePc =
-    "if(!d || !d.promoted){ el.innerHTML = \"<div class='upd avail'><b>Opening \" +\n"
-    + "              \"Photos?</b> Use your Keephaven password. It is on the last page of \" +\n"
+    "if(!d || !d.promoted){ el.innerHTML = \"<div class='upd avail'><b>${ifPhotos "Opening " "Your "}\" +\n"
+    + "              \"${ifPhotos "Photos?</b> Use your Keephaven password." "password?</b>"} It is on the last page of \" +\n"
     + "              \"setup, and in <b>Keephaven-password.txt</b> on the drive - to read \" +\n"
     + "              \"that, type q in the Keephaven window and wait for 'safe to \" +\n"
     + "              \"unplug'.</div>\"; return; }";
@@ -309,7 +317,7 @@ let
             el.innerHTML = "<div class='upd avail'>Update verified and ready" +
               (s.available ? " (" + escUpd(s.available) + ")" : "") + ". " +
               "<a href='http://" + host + ":8888'>Open Settings to install</a>" +
-              "<div class='upd-note'>Your photos and files are kept; it rolls back on its own if the update has a problem.</div></div>";
+              "<div class='upd-note'>${ifPhotos "Your photos and files are" "Your files and your agents' memory are"} kept; it rolls back on its own if the update has a problem.</div></div>";
           } else if(s.state === "applying" || s.state === "rolling-back"){
             el.innerHTML = "<div class='upd avail'>Installing update&hellip; your Keephaven will restart. This can take a few minutes.</div>";
           } else if(s.state === "applied-ok"){
@@ -374,7 +382,7 @@ let
             msg = "No backup for " + d + " days. Check that your second Keephaven is powered on and connected.";
           } else {
             cls = "err";
-            msg = "No backup for " + d + " days - your photos are on this box only. Check your second Keephaven.";
+            msg = "No backup for " + d + " days - ${ifPhotos "your photos are" "everything is"} on this box only. Check your second Keephaven.";
           }
           // A current failure is worth saying even while the last success is
           // recent: it is the early warning that the streak is about to break.
@@ -392,8 +400,8 @@ let
           if(!d || !d.promoted){ el.innerHTML = ""; return; }
           var from = d.promoted_from ? (" from keephaven-" + d.promoted_from) : "";
           var html = "<div class='upd err'>This is now your main Keephaven, restored" +
-            from + ". <b>You no longer have a backup</b> \u2014 your photos are on this box " +
-            "only. Add a second Keephaven and pair it to protect them again.</div>";
+            from + ". <b>You no longer have a backup</b> \u2014 ${ifPhotos "your photos are" "everything is"} on this box " +
+            "only. Add a second Keephaven and pair it to protect ${ifPhotos "them" "it"} again.</div>";
           // Said HERE too, because this is the screen the owner taps Photos from,
           // and Immich's own login screen cannot explain itself.
           if(d.photos_other_box){
@@ -670,13 +678,29 @@ let
         httpd.serve_forever()
   '';
 
-  dashboardApp = pkgs.writeText "cloudunit-dashboard.py"
+  # Lines that only make sense with Photos: the photo counter on its tile and the "Opening
+  # Photos?" sign-in notice. An edition without Immich drops them; every needle is checked on
+  # every edition, so an edit to one of these lines fails the build instead of being skipped.
+  photosOnlyLines = [
+    "if(typeof u.count === \"number\"){ t += \" · \" + u.count.toLocaleString() + \" photos\"; }"
+    "html += \"<div class='upd avail'><b>Opening Photos?</b> Use the password from \" +"
+    "src + \"'s sticker \\u2014 the photo library kept that box's sign-in. \" +"
+    "\"Everything else uses this box's password. You can change it in \" +"
+    "\"Settings \\u2192 Photos sign-in.</div>\";"
+  ];
+  dropPhotosLines = text:
+    lib.foldl' (acc: n: assert lib.assertMsg (builtins.replaceStrings [ n ] [ "" ] text != text)
+      "dashboard.nix: the page no longer contains \"${n}\"; update photosOnlyLines"; acc)
+      (if hasImmich then text
+       else builtins.replaceStrings photosOnlyLines (map (_: "") photosOnlyLines) text)
+      photosOnlyLines;
+  dashboardApp = pkgs.writeText "cloudunit-dashboard.py" (dropPhotosLines
     (if isPc
      then
        assert lib.assertMsg (lib.hasInfix pwNoteAnchor dashboardText)
          "dashboard.nix: the password note's anchor is missing from the page";
        builtins.replaceStrings [ pwNoteAnchor ] [ pwNotePc ] dashboardText
-     else dashboardText);
+     else dashboardText));
 
   # Cached storage report: read-only du/df/DB, written to storage.json on a timer.
   # The dashboard's /storage endpoint just reads this file (like /update-status),

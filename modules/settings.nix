@@ -41,6 +41,24 @@ let
   # live with their domain. Values are absolute /nix/store bin paths.
   wrappers = config.cloudunit.wrappers;
 
+  # Settings > Agents (modules/agent-memory.nix). Every splice below renders to "" when agent
+  # memory is off, so the settings app is byte-identical to the image without it.
+  memOn = config.keephaven.agentMemory.enable;
+  # replaceStrings is silent when a needle is missing, so every needle below is checked: an
+  # edited source line fails the build instead of shipping a script that skips its job.
+  withNeedles = what: needles: src:
+    lib.foldl' (acc: n: assert lib.assertMsg (builtins.replaceStrings [ n ] [ "" ] src != src)
+      "settings.nix: ${what} no longer contains \"${n}\"; update the needle with the source"; acc)
+      src needles;
+  # A drive has no sticker: the Agents form names the password file instead, like every
+  # other password field on the PC page.
+  agentsFuncs = lib.optionalString memOn (builtins.replaceStrings [ "@ADMIN@" "@PORT@" "the one on the sticker always works" ]
+    [ config.keephaven.agentMemory.adminWrapper (toString config.keephaven.agentMemory.port) "${pwHereLabel} always works" ]
+    (withNeedles "agent-memory-settings.py" [ "@ADMIN@" "@PORT@" "the one on the sticker always works" ]
+      (builtins.readFile ./agent-memory-settings.py)) + "\n\n");
+  agentsPost = lib.optionalString memOn
+    "elif self.path == \"/agents\":\n            agents_post(self, data)\n\n        ";
+
   applyApConfig = pkgs.writeShellScriptBin "cloudunit-apply-ap-config" ''
     set -euo pipefail
     AP_ENV="${dataDir}/ap.env"
@@ -92,11 +110,25 @@ let
     echo "OK: AP config applied"
   '';
 
+  # Only the apps this image has: see ACTIVE_APPS in apply-password.sh.
   applyPassword = pkgs.writeShellScriptBin "cloudunit-apply-password"
-    (builtins.readFile ./apply-password.sh);
+    (builtins.replaceStrings [ "@ACTIVE_APPS@" "@APPS_DIR@" ]
+      [ (lib.concatStringsSep " " config.keephaven.activeApps) config.keephaven.appsDir ]
+      (withNeedles "apply-password.sh" [ "@ACTIVE_APPS@" "@APPS_DIR@" ] (builtins.readFile ./apply-password.sh)));
 
+  # With agent memory on, a factory reset also stops it and erases every agent's folder,
+  # or the next owner inherits the agents' files and tokens (2026-10-24). Off, the
+  # script is byte for byte the shipped one.
   factoryReset = pkgs.writeShellScriptBin "cloudunit-factory-reset"
-    (builtins.readFile ./factory-reset.sh);
+    (if memOn then
+      builtins.replaceStrings
+        [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n"
+          "freshrss tailscale replication ssh; do" ]
+        [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n$SYSTEMCTL stop keephaven-agent-memory 2>/dev/null || true\n"
+          "freshrss tailscale replication ssh agent-memory; do" ]
+        (withNeedles "factory-reset.sh" [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n" "freshrss tailscale replication ssh; do" ]
+          (builtins.readFile ./factory-reset.sh))
+    else builtins.readFile ./factory-reset.sh);
 
   readSticker = pkgs.writeShellScriptBin "cloudunit-read-sticker" ''
     ${pkgs.gnugrep}/bin/grep '^UNIT_PASSWORD=' ${dataDir}/unit.env | ${pkgs.coreutils}/bin/cut -d= -f2-
@@ -159,7 +191,43 @@ let
     ${pkgs.systemd}/bin/systemctl reboot
   '';
 
-  settingsApp = pkgs.writeText "cloudunit-settings.py" ''
+  # An edition with no Photos (Agent Memory) gets the same page with words that fit it.
+  # With Immich in the image the list is never applied, so Home and Photos are unchanged.
+  noPhotosNeedles =
+      [ "your photos, films, music and files come back."
+        "Your photos, files, and apps are kept; "
+        "Your photos, files, and apps are not deleted."
+        "Your photos, files, and apps are"
+        "Your photos and files are kept."
+        "none of your photos, files, or passwords."
+        "all your photos, music,"
+        "movies, books, and files, and every app account."
+        "This ERASES ALL your photos and files permanently."
+        "Your photos, files, and settings are unchanged."
+        "It has none of your photos,"
+        "for another one. Its six "
+        "apps stop, and it shows backup status instead."
+        "Its own apps will stop." ];
+  noPhotosWords = text0:
+    let text = withNeedles "the Settings page" noPhotosNeedles text0; in
+    if builtins.elem "immich" config.keephaven.activeApps then text
+    else builtins.replaceStrings noPhotosNeedles
+      [ "your files and your agents' memory come back."
+        "Your files and your agents' memory are kept; "
+        "Your files and your agents' memory are not deleted."
+        "Your files and your agents' memory are"
+        "Your files and your agents' memory are kept."
+        "none of your files, agents' memory, or passwords."
+        "all your files,"
+        "every agent's memory, and every agent's token."
+        "This ERASES ALL your files and your agents' memory permanently."
+        "Your files, your agents' memory and your settings are unchanged."
+        "It has none of your agents' memory,"
+        "for another one. Agent memory "
+        "stops, and it shows backup status instead."
+        "Agent memory will stop." ]
+      text;
+  settingsApp = pkgs.writeText "cloudunit-settings.py" (noPhotosWords ''
     import http.server, socketserver, subprocess, urllib.parse, urllib.request, urllib.error, html, threading, time, json, hmac, socket, secrets, os
 
     PORT = 8888
@@ -902,7 +970,7 @@ let
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                 "<button type=\"submit\">Save apps</button></form></div></details>")
 
-    def page(msg="", host=None):
+    ${agentsFuncs}def page(msg="", host=None):
         note = ("<div class='note'>" + html.escape(msg) + "</div>") if msg else ""
         apps_card_html = apps_card()
         support = support_status_line()
@@ -1002,7 +1070,7 @@ let
       {note}
       {update_card}
       {photos_card}
-      {apps_card}
+      {apps_card}${lib.optionalString memOn "{agents_card}"}
       <details class="section" open>
         <summary>Network</summary>
         <div class="card">
@@ -1145,7 +1213,7 @@ let
         }});
       }});
       </script>
-    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html, home=html.escape(home))
+    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html,${lib.optionalString memOn " agents_card=agents_card(),"} home=html.escape(home))
 
     def run(cmd, timeout=None):
         try:
@@ -1274,7 +1342,7 @@ let
         except Exception:
             return True
 
-    def saved_page(title, value, kind):
+    def saved_page(title, value, kind, note=""):
         # Calm confirmation for clients NOT on the Keephaven AP (e.g. via the
         # home router over cable). Their connection is unaffected; still show the
         # new value for when they use the AP later.
@@ -1304,7 +1372,7 @@ let
         <p>Your current connection is not affected. {extra}</p>
       </div>
       <p style="text-align:center"><a href="/">&#8592; Back to Settings</a></p>
-    </body></html>""".format(title=html.escape(title), label=label, v=v, extra=extra)
+    </body></html>""".format(title=html.escape(title), label=label, v=v, extra=extra + html.escape(note))
 
     def _restart_shell(title, lead, on_ap_client):
         if on_ap_client:
@@ -1478,13 +1546,33 @@ let
                     return
                 r = run(["sudo", "-n", "${applyPassword}/bin/cloudunit-apply-password", newpw])
                 if r.returncode != 0:
-                    detail = (r.stdout.strip() + " " + r.stderr.strip()).strip()
-                    self._msg("Some apps did not update. Nothing else changed. You can try again. Details: " + detail)
+                    # Say exactly what changed: on a partial run some apps already have the new
+                    # password while Settings and the Wi-Fi keep the old one.
+                    lines = [l.strip() for l in r.stdout.splitlines() if ":" in l]
+                    took = [l.split(":")[0] for l in lines if l.endswith("updated")]
+                    failed = [l.split(":")[0] for l in lines if l.endswith("FAILED")]
+                    if r.returncode != 10:
+                        self._msg("Password was NOT changed. " + (r.stderr.strip().replace("ERROR: ", "") or "Try again."))
+                    elif took:
+                        self._msg("The new password reached " + ", ".join(took) + " but not " + ", ".join(failed)
+                                  + ". Settings and the Wi-Fi still use your old password. Press Change password again"
+                                  + " with the same new password: the apps that already have it are skipped.")
+                    else:
+                        self._msg("Password was NOT changed: " + ", ".join(failed) + " didn't answer. Nothing changed. You can try again.")
                     return
+                # An app the owner switched off was skipped and still has the old password: say so now,
+                # not weeks later when it refuses the new one.
+                off = [l.strip().split(":")[0] for l in r.stdout.splitlines() if l.strip().endswith("skipped (switched off)")]
+                note = ""
+                if off:
+                    one = len(off) == 1
+                    note = (" " + ", ".join(off) + (" is" if one else " are") + " switched off, so " + ("it keeps" if one else "they keep")
+                            + " your old password. After you switch " + ("it" if one else "them") + " back on, change the password again.")
                 if on_ap(self):
-                    self._result(reconnect_page(newpw, current_ssid_safe()))
+                    self._result(reconnect_page(newpw, current_ssid_safe(),
+                                                intro="Your apps and file sharing are updated." + note + " The Wi-Fi password is changing now."))
                 else:
-                    self._result(saved_page("Password changed", newpw, "pw"))
+                    self._result(saved_page("Password changed", newpw, "pw", note))
                 deferred_ap(newpw)
 
             elif self.path == "/reset-password":
@@ -1625,7 +1713,7 @@ let
                     return
                 self._msg("Support access is now on for " + hours + " hours. It will turn off by itself when the time is up.")
 
-            elif self.path == "/apps":
+            ${agentsPost}elif self.path == "/apps":
                 verdict = auth_check(data)
                 if verdict != "ok":
                     self._msg(auth_deny_msg(verdict, "Your apps were NOT changed."))
@@ -1865,7 +1953,7 @@ let
         allow_reuse_address = True
     with Threaded(("", PORT), Handler) as httpd:
         httpd.serve_forever()
-  '';
+  '');
 
   resetPassword = pkgs.writeShellScriptBin "cloudunit-reset-password" ''
     set -u
@@ -1956,6 +2044,8 @@ in
       { command = wrappers.pairUnpair; options = [ "NOPASSWD" ]; }
       { command = wrappers.tailnetPeers; options = [ "NOPASSWD" ]; }
       { command = wrappers.appSet; options = [ "NOPASSWD" ]; }
+    ] ++ lib.optionals memOn [
+      { command = config.keephaven.agentMemory.adminWrapper; options = [ "NOPASSWD" ]; }
     ] ++ lib.optionals config.keephaven.replication.enable [
       { command = wrappers.replicaSyncNow; options = [ "NOPASSWD" ]; }
       { command = wrappers.replicaTargetStatus; options = [ "NOPASSWD" ]; }

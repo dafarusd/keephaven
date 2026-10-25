@@ -23,10 +23,17 @@
 , image     # the prod sdImage derivation (holds sd-image/*.img.zst)
 , writer    # the built Keephaven-Writer.exe derivation
 , imageVersion
+, # Which drive edition this bundle is. The defaults are the Photos SSD, so its bundle renders
+  # exactly as before; the Agent Memory SSD passes its own (2026-10-24).
+  fileBase ? "keephaven-photos-ssd"
+, productName ? "Keephaven Photos SSD"
+, # Two things in the how-to that differ by edition: its opening paragraph, and the download's size.
+  howtoTried ? "Early release. Free while it's early. If you grab it now it stays free for you.\nLater versions will cost money. It's booted on one PC so far, so keep your\noriginals somewhere else too."
+, howtoDownloadGb ? "5"
 }:
 let
   pkgs = import nixpkgs { system = "x86_64-linux"; };
-  base = "keephaven-photos-ssd-${imageVersion}";
+  base = "${fileBase}-${imageVersion}";
 
   # The image as gzip, on its own, depending on the image and nothing else. Split out because
   # recompressing 36.5 GB takes ten minutes and a one-line change to the writer must not pay
@@ -88,7 +95,7 @@ let
     echo "image $BYTES bytes, sha256 $RAW"
   '';
 in
-pkgs.runCommand "keephaven-photos-ssd-download-${imageVersion}"
+pkgs.runCommand "${fileBase}-download-${imageVersion}"
   {
     nativeBuildInputs = [ pkgs.coreutils ];
     passthru = { inherit imageVersion base imageGz; };
@@ -100,11 +107,9 @@ pkgs.runCommand "keephaven-photos-ssd-download-${imageVersion}"
   chmod -R u+w $out
 
   cat > $out/HOW-TO-WRITE-THE-DRIVE.txt <<'TXT'
-  Keephaven Photos SSD ${imageVersion} - putting it on a drive
+  ${productName} ${imageVersion} - putting it on a drive
 
-  Early release. Free while it's early. If you grab it now it stays free for you.
-  Later versions will cost money. It's booted on one PC so far, so keep your
-  originals somewhere else too.
+  ${howtoTried}
 
   You need a USB SSD of 64 GB or more, in a USB enclosure. Everything on it will
   be erased. Thunderbolt and USB4 enclosures are not supported yet: Windows
@@ -134,7 +139,7 @@ pkgs.runCommand "keephaven-photos-ssd-download-${imageVersion}"
   two downloads; in PowerShell, Get-FileHash <file> -Algorithm SHA256.
 
   It checks the download before it touches the drive, then writes, then reads the
-  whole drive back. Each of those three steps moves about 5 GB, 36 GB and 36 GB,
+  whole drive back. Each of those three steps moves about ${howtoDownloadGb} GB, 36 GB and 36 GB,
   and it prints how fast it is going as it works. On the PC we measured - a Core i3
   laptop, USB 3 - the write took 2 minutes 19 seconds and the read-back a little
   over one.

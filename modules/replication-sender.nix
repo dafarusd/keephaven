@@ -65,7 +65,19 @@ let
   # replication feature flag: the update arc's pre-update dump needs it on every
   # box, including customer boxes with replication switched off. This module just
   # points it at the replication staging directory.
-  dumpBin = config.cloudunit.wrappers.immichDump;
+  # An edition with no Immich has no photo database to protect. The real dump answers 2
+  # ("nothing to protect") there, which the sync below reads as a failure, so nothing was
+  # ever sent (2026-10-24). Such an edition gets a stand-in that makes the empty dump/
+  # folder and carries on. Editions with Immich keep the real dump, byte for byte.
+  dumpBin =
+    if builtins.elem "immich" config.keephaven.activeApps
+    then config.cloudunit.wrappers.immichDump
+    else "${noPhotoDb}/bin/cloudunit-no-photo-db";
+  noPhotoDb = pkgs.writeShellScriptBin "cloudunit-no-photo-db" ''
+    ${pkgs.coreutils}/bin/mkdir -p "''${1:?output directory}"
+    ${pkgs.coreutils}/bin/chmod 700 "$1"
+    echo "no photo database in this edition; nothing to dump"
+  '';
 
   # ---- The nightly sync ------------------------------------------------------
   # Guarded, locked, timeout-bounded, and it NEVER blocks or fails the box:
@@ -329,7 +341,7 @@ let
     FSTATE=""
     FMSG=""
     for d in apps-off.list immich/library immich/external jellyfin/media navidrome/media \
-             audiobookshelf/media kavita/media; do
+             audiobookshelf/media kavita/media${lib.optionalString config.keephaven.agentMemory.enable " agent-memory"}; do
       [ -e "${dataDir}/$d" ] || continue
       if ! push "${dataDir}/./$d"; then
         FAILED="$FAILED $d"

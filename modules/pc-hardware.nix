@@ -86,7 +86,10 @@ in
   # Its own name, its own version line, its own feed. The feed path is what keeps the two
   # apart on the server: a drive asks .../ssd/manifest.json and can never be handed a Pi image
   # by accident, whatever either side gets wrong later.
-  keephaven.productName = "Keephaven SSD";
+  # The Agent Memory edition is its own product on a drive too, with its own feed below.
+  # Photos keeps the shipped name and path, byte for byte.
+  keephaven.productName =
+    if config.keephaven.edition == "photos" then "Keephaven SSD" else "Keephaven Agent Memory SSD";
   # Written HERE, not in update.nix: this module is only ever imported for a drive, so the file
   # cannot reach a Pi image. Doing it in the shared module moved both Pi store paths.
   environment.etc."cloudunit/update/product".text = config.keephaven.productName + "\n";
@@ -97,7 +100,11 @@ in
   # mkForce because the edition already picks a feed (editions.nix sets .../photos/ for a
   # Photos box). A drive is not a Photos box on a Pi, so it takes its own path regardless of
   # edition — that separation is the whole point.
-  keephaven.updateBaseUrl = lib.mkForce "https://updates.keephaven.co/ssd/";
+  # One feed per drive edition: an Agent Memory drive must never be offered a Photos image,
+  # which it would accept, since every edition is signed with the same key (2026-10-24).
+  keephaven.updateBaseUrl = lib.mkForce (
+    if config.keephaven.edition == "photos" then "https://updates.keephaven.co/ssd/"
+    else "https://updates.keephaven.co/ssd-${config.keephaven.edition}/");
 
   # The loader is a file placed on partition 1 at build time. Nothing runs
   # bootctl or grub-install on the box.
@@ -175,8 +182,11 @@ in
 
       Password:  $UNIT_PASSWORD
 
+      ${if builtins.elem "immich" config.keephaven.activeApps then ''
       That password is for the photos app and for the Settings page. The photos
-      app also wants an email address: keephaven@local
+      app also wants an email address: keephaven@local'' else ''
+      That password is for the Settings page, where you add and remove your AI
+      agents (Settings > Agents).''}
 
       Keep this file. It is the only copy. A Keephaven box has this printed on a
       sticker underneath it; a drive has this file instead. Anyone who can read
@@ -207,6 +217,10 @@ in
     description = "Read this drive's update code from its Windows-visible partition";
     wantedBy = [ "multi-user.target" ];
     before = [ "cloudunit-update-check.service" "cloudunit-update-stage.service" ];
+    # After the sticker, which mounts the same partition read-write at boot: run together, this
+    # read-only mount failed on 2 of 3 boots of a drive ("already mounted ... would change RO
+    # state") and the drive came up with no code until its next boot (2026-10-24, VM journal).
+    after = [ "keephaven-drive-sticker.service" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;

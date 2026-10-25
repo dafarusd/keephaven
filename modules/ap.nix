@@ -123,6 +123,12 @@ EOF
       server = [ "1.1.1.1" "8.8.8.8" ];
     };
   };
+  # A PC drive has no wlan0, so dnsmasq never starts there (its condition below). Left at
+  # the default, resolveLocalQueries still pointed the drive's own resolv.conf at 127.0.0.1
+  # with nothing answering, so no drive could look up updates.keephaven.co or any other
+  # name (2026-10-24: found in a VM, the same error is in the HP's 2026.10.16 evidence).
+  # On a PC the drive uses the DNS server its network hands out, like any computer.
+  services.dnsmasq.resolveLocalQueries = lib.mkIf isPc false;
   # AP-side name resolution for the box's OWN .local names. Phones on wlan0 get
   # dnsmasq (192.168.50.1) as their DNS server (DHCP option 6 above); a unicast
   # A query for keephaven-<suffix>.local would otherwise be forwarded upstream

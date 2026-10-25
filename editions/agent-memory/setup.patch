@@ -1,0 +1,27 @@
+--- a/main.go
++++ b/main.go
+@@ -42,7 +42,7 @@
+ // base is where this asks for everything. Baked in, never read from a file or an argument:
+ // a setup program that can be pointed somewhere else is a setup program that can be used to
+ // deliver somebody else's image.
+-const base = "https://updates.keephaven.co/get/ssd"
++const base = "https://updates.keephaven.co/get/ssd-agent-memory"
+ 
+ // codeField is overwritten at download time. The marker is searched for in the binary and the
+ // 64 bytes after it are the code, padded with dots - a code may contain '-' and never a '.',
+@@ -103,13 +103,13 @@
+ }
+ 
+ func main() {
+-	say("Keephaven Photos SSD - setup %s", version)
++	say("Keephaven Agent Memory SSD - setup %s", version)
+ 	say("")
+ 
+ 	code := buyerCode()
+ 	if code == "" {
+ 		stop("This copy of the setup program has no update code in it.\n" +
+-			"Download it again from keephaven.co/ssd - each download carries its own.")
++			"Download it again from keephaven.co/agent-memory - each download carries its own.")
+ 	}
+ 
+ 	exe, err := os.Executable()

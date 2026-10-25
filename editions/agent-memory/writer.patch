@@ -1,0 +1,11 @@
+--- a/main.go
++++ b/main.go
+@@ -100,7 +100,7 @@
+ }
+ 
+ func main() {
+-	say("Keephaven Photos SSD writer %s", version)
++	say("Keephaven Agent Memory SSD writer %s", version)
+ 	say("")
+ 
+ 	if !isAdmin() {

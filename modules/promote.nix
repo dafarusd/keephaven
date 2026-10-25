@@ -55,6 +55,12 @@ let
   # is unchanged. A Photos box restores only immich/library + immich/external.
   restorePaths = config.keephaven.activeBackupPaths;
 
+  # An edition with no Immich has no photo database to check or restore. Every splice
+  # below that uses noDb renders to "" when Immich is in the image, so Home and Photos
+  # keep their script byte for byte (2026-10-24).
+  hasImmich = builtins.elem "immich" config.keephaven.activeApps;
+  noDb = lib.optionalString (!hasImmich);
+
   # Read-only: what the confirmation screen needs to name the source box and the
   # backup's age. Kept separate from the promote wrapper so the UI can call it
   # without any risk of starting anything.
@@ -68,7 +74,7 @@ let
 
     D="$(${pkgs.findutils}/bin/find ${dumpDir} -maxdepth 1 -type f -name 'immich-*.sql.zst' -printf '%f\n' 2>/dev/null \
          | $co/sort -r | $co/head -n1)"
-    if [ -z "''${D:-}" ]; then
+    ${noDb "[ -f ${landing}/apps-off.list ] && D=../apps-off.list\n    "}if [ -z "''${D:-}" ]; then
       $co/printf 'state=no-backup-yet\npeer=%s\n' "''${PEER:-unknown}"
       exit 0
     fi
@@ -193,7 +199,7 @@ let
       say refused true "This Keephaven is not a backup box. Nothing has been changed."
       exit 2
     fi
-    D="$(${pkgs.findutils}/bin/find ${dumpDir} -maxdepth 1 -type f -name 'immich-*.sql.zst' -printf '%f\n' 2>/dev/null \
+    ${noDb "if [ ! -f ${landing}/apps-off.list ]; then\n      say refused true \"There is no backup on this Keephaven yet, so there is nothing to restore. Nothing has been changed.\"\n      exit 3\n    fi\n    if false; then\n    "}D="$(${pkgs.findutils}/bin/find ${dumpDir} -maxdepth 1 -type f -name 'immich-*.sql.zst' -printf '%f\n' 2>/dev/null \
          | $co/sort -r | $co/head -n1)"
     if [ -z "''${D:-}" ]; then
       say refused true "There is no backup on this Keephaven yet, so there is nothing to restore. Nothing has been changed."
@@ -230,7 +236,7 @@ let
           exit 5 ;;
     esac
 
-    say starting true "Restoring from the backup. This can take a while; you can leave this page."
+    ${noDb "fi\n    "}say starting true "Restoring from the backup. This can take a while; you can leave this page."
 
     # ---- phase 3: FILES FIRST. Immich's database points at originals, so they
     # must be on disk before it is replayed. -rlptD is -a WITHOUT owner/group:
@@ -252,7 +258,17 @@ let
       ${dataDir}/jellyfin/media ${dataDir}/navidrome/media \
       ${dataDir}/audiobookshelf/media ${dataDir}/kavita/media \
       ${dataDir}/immich/external 2>/dev/null || true
-    say files-restored true "Your files are in place. Restoring the photo library next."
+    ${lib.optionalString config.keephaven.agentMemory.enable ''
+    # Agent memory came back root-owned (rsync -rlptD as root). Hand it back to its service;
+    # the registry stays root-owned and group-readable, as the admin wrapper leaves it.
+    if [ -d ${dataDir}/agent-memory ]; then
+      ${pkgs.coreutils}/bin/chown -R kh-memory:kh-memory ${dataDir}/agent-memory || FAILED="$FAILED agent-memory-owner"
+      if [ -f ${dataDir}/agent-memory/agents.json ]; then
+        ${pkgs.coreutils}/bin/chown root:kh-memory ${dataDir}/agent-memory/agents.json || FAILED="$FAILED agent-memory-owner"
+      fi
+      [ -z "$FAILED" ] || echo "promote: agent memory ownership fix failed:$FAILED"
+    fi
+    ''}say files-restored true "Your files are in place. ${if hasImmich then "Restoring the photo library next." else "Starting up next."}"
 
     # ---- phase 3b: APP PICKER - adopt the main box's picks BEFORE phase 4 lets
     # the services start, so an app the owner had switched off stays off here.
@@ -299,7 +315,7 @@ let
     # survived, so every retry failed identically - which broke the retry-safe
     # promise the status message makes. Dropping and recreating makes the restore
     # genuinely idempotent, so that promise is true rather than softened.
-    ${pkgs.systemd}/bin/systemctl start --no-block cloudunit-immich.service || true
+    ${noDb "if false; then\n    "}${pkgs.systemd}/bin/systemctl start --no-block cloudunit-immich.service || true
     i=0
     while [ "$i" -lt 60 ]; do
       # Stop them on every pass: compose may bring them up a moment after the
@@ -344,7 +360,7 @@ let
     fi
     say db-restored true "Your photo library is restored. Starting your apps."
 
-    # ---- phase 6: start everything, and mark the box promoted.
+    ${noDb "fi\n    "}# ---- phase 6: start everything, and mark the box promoted.
     # RESTART for immich, not start. Phase 5 started its oneshot unit
     # (RemainAfterExit=true) to get postgres up, then stopped the app containers
     # at the DOCKER layer. `start` on an already-active oneshot is a NO-OP, so
@@ -353,11 +369,11 @@ let
     # held-down containers Exited(143). Every stop must be paired with a start
     # at the SAME layer or via a verb that re-executes; restart re-runs compose
     # down+up and revives them in every unit state, including on a retry.
-    ${pkgs.systemd}/bin/systemctl restart --no-block cloudunit-immich.service || true
+    ${noDb ": "}${pkgs.systemd}/bin/systemctl restart --no-block cloudunit-immich.service || true
     ${lib.concatMapStringsSep "\n    " (s:
       "${pkgs.systemd}/bin/systemctl start --no-block cloudunit-${s}.service || true")
       (builtins.filter (s: s != "immich") config.keephaven.activeApps)}
-    $co/printf 'promoted_from=%s\npromoted_at=%s\n' "''${PEER:-unknown}" \
+    ${lib.optionalString config.keephaven.agentMemory.enable "${pkgs.systemd}/bin/systemctl start --no-block keephaven-agent-memory.service || true\n    "}$co/printf 'promoted_from=%s\npromoted_at=%s\n' "''${PEER:-unknown}" \
       "$($co/date -u '+%Y-%m-%dT%H:%M:%SZ')" > ${promotedFlag}
     $co/chmod 644 ${promotedFlag}
     # The pairing is retired, not reused: the peer is presumably gone. No
@@ -443,7 +459,7 @@ let
       log "promote: restore complete but these apps did not come up healthy:$UNHEALTHY"
     fi
 
-    # ---- phase 7: the Photos credential.
+    ${noDb "say done true \"This is now your main Keephaven. Everything from your backup is here. You no longer have a backup: add a second Keephaven and pair it to protect it again.\"\n    exit 0\n    "}# ---- phase 7: the Photos credential.
     # The restored database carries the SOURCE box's admin account, so Photos
     # currently wants that box's sticker password - not this one's. The existing
     # password mechanism (apply-password.sh) cannot fix it: every service there
