@@ -76,6 +76,27 @@ It's the same licence and the same source as the boxes. The drive edition's own 
 - What it is, what it needs, and the checksums: https://keephaven.co/ssd
 - The documentation, release checksums and how-to: https://github.com/dafarusd/keephaven-photos-ssd
 
+## Memory for your AI agents
+
+**Keephaven Agent Memory** is Keephaven with every app taken out and one thing switched on: a place where your AI agents keep what they remember, on hardware you own. It runs on a Pi 5 with an NVMe drive, or on a USB SSD on a Windows PC with the same drive setup as Photos SSD. Setup, Settings, signed updates, remote access and box-to-box backup are all still there.
+
+- Each agent you add in Settings → Agents gets its own folder with a size limit, and a key shown once. The box keeps only a hash of it.
+- An agent can't see another agent's folder. Its journal is append-only — it can add, never edit or delete.
+- Revoke an agent and its key stops working at once. Its files stay until you delete them.
+- Anything that speaks MCP connects through [keephaven-mcp](https://github.com/dafarusd/keephaven-mcp) (MIT): `npx -y github:dafarusd/keephaven-mcp`. Or call the API on port 8790 directly.
+
+The service is one Python file with no dependencies, `modules/agent-memory.py`, wired in by `modules/agent-memory.nix`. Try it with no box, on Linux with Nix (x86-64 or arm64):
+
+```
+nix run github:dafarusd/keephaven#agent-memory -- serve --data ./mem --dev-token pick-one
+```
+
+Or boot the whole Agent Memory SSD image in a VM under QEMU, no hardware at all: https://gist.github.com/dafarusd/43a6bfad80e7b4db4e9897133262aee8
+
+Tested: 22 API tests and a two-VM NixOS test. The Pi edition passed its release checks on one Pi 5, the SSD edition on a real USB drive on a Windows PC. Backup ran from a real Pi 5 (pre-release build) to a PC build in a VM over Tailscale — not yet between two real boxes.
+
+Downloads and checksums: https://keephaven.co/agent-memory
+
 ## What you need
 
 - A Raspberry Pi 5. Tested on the 8 GB model.
