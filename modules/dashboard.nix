@@ -531,14 +531,21 @@ let
 
         def do_GET(self):
             if self.path.split("?", 1)[0] == "/update-status":
+                # Last-Modified says when the check wrote the file. Without it a
+                # status left over from before a restart reads exactly like a
+                # fresh one (2026-10-25, on the HP).
+                written = None
                 try:
                     with open("/var/lib/cloudunit/update/status.json", "rb") as f:
+                        written = os.fstat(f.fileno()).st_mtime
                         body = f.read(8192)
                 except OSError:
                     body = b'{"state":"unknown"}'
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Cache-Control", "no-store")
+                if written is not None:
+                    self.send_header("Last-Modified", self.date_time_string(written))
                 self.end_headers()
                 self.wfile.write(body)
                 return

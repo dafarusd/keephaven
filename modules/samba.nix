@@ -126,7 +126,7 @@ in
   };
 
   systemd.services.cloudunit-samba-bootstrap = {
-    description = "Cloud Unit - Samba credential bootstrap (from unit.env)";
+    description = "Cloud Unit - Samba credential bootstrap";
     after = [ "samba-smbd.service" "cloudunit-unit-bootstrap.service" ];
     wants = [ "cloudunit-unit-bootstrap.service" ];
     wantedBy = [ "multi-user.target" ];
@@ -135,7 +135,7 @@ in
     # an OTA REPLACES -- wiping the password. A first-boot-only marker on p4 would
     # survive the update and (falsely) report "already bootstrapped", so the passdb
     # would never be re-seeded -> empty password -> Samba auth fails after every
-    # update. Re-asserting from unit.env each boot is idempotent and OTA-safe.
+    # update. Re-asserting the password each boot is idempotent and OTA-safe.
     unitConfig = {
       RequiresMountsFor = dataDir;
     };
@@ -156,14 +156,19 @@ in
         echo "UNIT_PASSWORD empty; retrying" >&2
         exit 1
       fi
+      # The password set in Settings once the owner has changed it (apply-password writes
+      # current.env once every app took it), else the sticker's.
+      PW="$UNIT_PASSWORD"
+      C="$(${pkgs.gnugrep}/bin/grep '^CURRENT_PASSWORD=' ${dataDir}/current.env 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)"
+      if [ -n "$C" ]; then PW="$C"; fi
       # Idempotent: add the samba user on first seed, update the password on every
       # later boot (including after an OTA p2-swap left an empty passdb). smbpasswd
       # -a fails on an existing entry in some builds, so branch on existence.
       if ${pkgs.samba}/bin/pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qx ${sambaUser}; then
-        printf '%s\n%s\n' "$UNIT_PASSWORD" "$UNIT_PASSWORD" \
+        printf '%s\n%s\n' "$PW" "$PW" \
           | ${pkgs.samba}/bin/smbpasswd -s ${sambaUser}
       else
-        printf '%s\n%s\n' "$UNIT_PASSWORD" "$UNIT_PASSWORD" \
+        printf '%s\n%s\n' "$PW" "$PW" \
           | ${pkgs.samba}/bin/smbpasswd -a -s ${sambaUser}
       fi
     '';

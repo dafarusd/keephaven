@@ -51,20 +51,20 @@ More: https://keephaven.co/backup
 
 ## Download
 
-Current release: **2026.10.05** — the same version the update server hands out to every box. What changed in each release: https://keephaven.co/releases
+Current release: **2026.10.29** — the same version the update server hands out to every box. What changed in each release: https://keephaven.co/releases
 
 Step-by-step setup lives on the site: https://keephaven.co/download#setup
 
-- File: [`keephaven-2026.10.05.img.zst`](https://updates.keephaven.co/download/keephaven-2026.10.05.img.zst)
-- Size: 6,266,737,924 bytes compressed, 35,445,014,528 bytes unpacked
-- SHA-256: `004efab68db3ebcfc44a811f3db626ffc919e9dc13c1a3f23b8a108819d87bd8`
+- File: [`keephaven-2026.10.29.img.zst`](https://updates.keephaven.co/download/keephaven-2026.10.29.img.zst)
+- Size: 6,265,471,846 bytes compressed, 35,445,014,528 bytes unpacked
+- SHA-256: `c60961737dc21ace56f89377369db4039b81333cef830c5cb990f97ea101dd13`
 
 There's also a Photos edition that runs only Immich. Its image is on the same download page.
 
 Check it before you flash:
 
 ```
-sha256sum keephaven-2026.10.05.img.zst
+sha256sum keephaven-2026.10.29.img.zst
 ```
 
 ## On a Windows PC instead of a box
@@ -117,7 +117,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 Then, with your SSD's name in place of `sdX`:
 
 ```
-zstd -d keephaven-2026.10.05.img.zst -o keephaven.img
+zstd -d keephaven-2026.10.29.img.zst -o keephaven.img
 sudo blkdiscard -f /dev/sdX
 sudo dd if=keephaven.img of=/dev/sdX bs=4M status=progress conv=fsync
 sync
@@ -158,14 +158,6 @@ nix build .#packages.aarch64-linux.prod --accept-flake-config -o result-prod
 ```
 
 The image lands in `result-prod/sd-image/`. `--accept-flake-config` lets Nix use the `nixos-raspberrypi` binary cache, so the Pi kernel downloads instead of compiling.
-
-To confirm this source is what built the download:
-
-```
-nix eval --raw .#packages.aarch64-linux.prod.outPath --accept-flake-config
-```
-
-At this commit it prints `/nix/store/jgama58m7f0fh2b1d1fddmw8x3b911w8-nixos-image-rpi5-kernel.img.zst`, the same store path the published image was built as. Same source, same inputs. Your own build's bytes may still differ from the download, since that isn't checked bit for bit.
 
 To build the drive edition instead, on an x86-64 Linux machine:
 

@@ -4,6 +4,9 @@
 let
   dataDir = "/var/lib/cloudunit";
   unitEnv = "${dataDir}/unit.env";
+  # Sign in with the password the apps have now: the one set in Settings (apply-password
+  # writes current.env once every app took it), else the sticker's.
+  currentPassword = ''C="$(${pkgs.gnugrep}/bin/grep '^CURRENT_PASSWORD=' ${dataDir}/current.env 2>/dev/null | ${pkgs.coreutils}/bin/cut -d= -f2-)"; if [ -n "$C" ]; then PASSWORD="$C"; fi'';
   setupFlag = "${dataDir}/.setup-complete";
 
   mkProvision = { name, after ? [], script }:
@@ -46,6 +49,7 @@ let
     J="http://localhost:8096"
     USERNAME="keephaven"; PASSWORD="keephaven"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     jf_token() {
       ${curl} -s -X POST "$J/Users/AuthenticateByName" \
@@ -139,6 +143,7 @@ let
     N="http://localhost:4533"
     USERNAME="keephaven"; PASSWORD="keephaven"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     ready=""
     for i in $(seq 1 60); do
@@ -173,6 +178,7 @@ let
     DOCKER="${pkgs.docker}/bin/docker"
     USERNAME="keephaven"; PASSWORD="keephaven"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
     FR="/var/www/FreshRSS"
 
     ready=""
@@ -210,6 +216,7 @@ let
     RECOVERED="${dataDir}/kavita/.recovery-attempted"
     USERNAME="keephaven"; PASSWORD="keephaven"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     # TARGETED REPAIR: a broken appsettings.json, fixed BEFORE the 5-minute probe.
     #
@@ -348,6 +355,7 @@ let
     A="http://localhost:13378"
     USERNAME="keephaven"; PASSWORD="keephaven"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     ready=""
     for i in $(seq 1 60); do
@@ -409,6 +417,7 @@ let
     EMAIL="keephaven@local"; PASSWORD="keephaven"
     EXT="${immichExternalPath}"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     ready=""
     for i in $(seq 1 60); do
@@ -501,6 +510,7 @@ let
     EMAIL="keephaven@local"; PASSWORD="keephaven"
     EXT="${immichExternalPath}"
     if [ -f ${unitEnv} ]; then . ${unitEnv}; PASSWORD="$UNIT_PASSWORD"; fi
+    ${currentPassword}
 
     resp=$(${curl} -s -X POST "$I/api/auth/login" -H "Content-Type: application/json" \
       -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" 2>/dev/null || true)
