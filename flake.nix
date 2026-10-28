@@ -106,10 +106,10 @@
       # edit to a tracked file: the shipped outputs above keep it off and stay unchanged.
       memoryOn = [ { keephaven.agentMemory.enable = true; } ];
       # The Agent Memory editions' own release line (Pi and drive); the first is 2026.10.24.
-      agentmemVersion = "2026.10.24";
+      agentmemVersion = "2026.10.30";
       # The drive's own line from 2026.10.25: the 2026.10.24 drive could not look up any name
       # (modules/ap.nix), and a fixed build never reuses a version string.
-      agentmemSsdVersion = "2026.10.25";
+      agentmemSsdVersion = "2026.10.30";
     in
     {
       # Twin systems from one source tree. dev = keyed + SSH on LAN (testing);
@@ -281,6 +281,14 @@
       checks.x86_64-linux.agentmem-backup-pair = import ./tests/agentmem-backup-pair.nix {
         pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
         inherit productModules;
+      };
+
+      # The same pair with the Home box's owner switch: off until turned on, off/on keeps the
+      # agents, refused on a backup box, carried through a takeover, cleared by a factory reset.
+      checks.x86_64-linux.agentmem-switch-pair = import ./tests/agentmem-backup-pair.nix {
+        pkgs = nixos-raspberrypi.inputs.nixpkgs.legacyPackages.x86_64-linux;
+        inherit productModules;
+        switchable = true;
       };
 
       checks.x86_64-linux.pc-photos = import ./tests/pc-photos.nix {

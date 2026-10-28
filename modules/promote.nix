@@ -110,7 +110,7 @@ let
   # a dashboard notice that scrolls past or clears. It needs a permanent home,
   # and better still a way to END it. [Dafarus, 2026-08-14]
   #
-  # status: "ok" once THIS box's sticker password works (so the notice removes
+  # status: "ok" once THIS box's own password works (so the notice removes
   # itself the moment it stops being true - no dismiss button to mis-click),
   # "other-box" while it does not, "unknown" if Immich is not answering yet
   # (never show a scary message during startup), "n/a" if not promoted.
@@ -118,6 +118,10 @@ let
     set -u
     [ -f ${promotedFlag} ] || { echo "n/a"; exit 0; }
     STICKER="$(${pkgs.gawk}/bin/awk -F= '/^UNIT_PASSWORD=/{print $2; exit}' ${unitEnv} 2>/dev/null)"
+    # This box's own password: the one set in Settings (current.env) if the owner changed it,
+    # else the sticker's -- the same rule as every app's startup step and file sharing.
+    OWN="$(${pkgs.gawk}/bin/awk -F= '/^CURRENT_PASSWORD=/{print substr($0, index($0, "=") + 1); exit}' ${dataDir}/current.env 2>/dev/null)"
+    if [ -n "''${OWN:-}" ]; then STICKER="$OWN"; fi
     [ -n "''${STICKER:-}" ] || { echo "unknown"; exit 0; }
     PING="$(${pkgs.curl}/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
              http://localhost:2283/api/server/ping 2>/dev/null || true)"
@@ -139,6 +143,10 @@ let
     OLD="$(printf '%s' "$OLD" | ${pkgs.coreutils}/bin/tr -d '\r\n')"
     [ -n "$OLD" ] || { echo "no password given" >&2; exit 2; }
     STICKER="$(${pkgs.gawk}/bin/awk -F= '/^UNIT_PASSWORD=/{print $2; exit}' ${unitEnv} 2>/dev/null)"
+    # This box's own password: the one set in Settings (current.env) if the owner changed it,
+    # else the sticker's -- the same rule as every app's startup step and file sharing.
+    OWN="$(${pkgs.gawk}/bin/awk -F= '/^CURRENT_PASSWORD=/{print substr($0, index($0, "=") + 1); exit}' ${dataDir}/current.env 2>/dev/null)"
+    if [ -n "''${OWN:-}" ]; then STICKER="$OWN"; fi
     [ -n "''${STICKER:-}" ] || { echo "could not read this box's password" >&2; exit 1; }
     TOK="$(${pkgs.curl}/bin/curl -s --max-time 10 -X POST http://localhost:2283/api/auth/login \
             -H 'Content-Type: application/json' \
@@ -150,7 +158,7 @@ let
              -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
              -d "{\"password\":\"$OLD\",\"newPassword\":\"$STICKER\"}" 2>/dev/null || true)"
     case "$CODE" in
-      (200|201) echo "OK: Photos now uses this box's sticker password" ;;
+      (200|201) echo "OK: Photos now uses this box's password" ;;
       (*) echo "could not change the Photos password (code $CODE)" >&2; exit 4 ;;
     esac
   '';
@@ -288,7 +296,8 @@ let
             ${pkgs.coreutils}/bin/touch "${config.keephaven.appsDir}/$p.off"
           fi
         done
-      done < "${landing}/apps-off.list"
+      done < "${landing}/apps-off.list"${lib.optionalString (config.keephaven.agentMemory.enable && config.keephaven.agentMemory.switchable)
+        "\n  # Agent memory's switch: on here if it was on there (the start below obeys it).\n  if ${pkgs.gnugrep}/bin/grep -qx agent-memory.on \"${landing}/apps-off.list\"; then\n    ${pkgs.coreutils}/bin/touch ${config.keephaven.appsDir}/agent-memory.on\n    ${pkgs.coreutils}/bin/chmod 644 ${config.keephaven.appsDir}/agent-memory.on\n  fi"}
     fi
     ${pkgs.systemd}/bin/systemctl restart cloudunit-samba-apps.service || true
 
@@ -471,6 +480,10 @@ let
     # BEST EFFORT ONLY - never fails the promotion. The data is what matters, and
     # if this cannot be done the owner is told exactly which password to use.
     STICKER="$(${pkgs.gawk}/bin/awk -F= '/^UNIT_PASSWORD=/{print $2; exit}' ${unitEnv} 2>/dev/null)"
+    # This box's own password: the one set in Settings (current.env) if the owner changed it,
+    # else the sticker's -- the same rule as every app's startup step and file sharing.
+    OWN="$(${pkgs.gawk}/bin/awk -F= '/^CURRENT_PASSWORD=/{print substr($0, index($0, "=") + 1); exit}' ${dataDir}/current.env 2>/dev/null)"
+    if [ -n "''${OWN:-}" ]; then STICKER="$OWN"; fi
     CREDS=unknown
     if [ -n "''${STICKER:-}" ]; then
       # Wait for the API only while its container is actually coming up. The
@@ -520,9 +533,9 @@ let
     if [ "$CREDS" = "ok" ]; then
       # Confirm the change rather than letting them discover it: their Photos
       # password is not what it was on the box the library came from.
-      say done true "This is now your main Keephaven. All of your photos and files are here, and every app - including Photos - now uses THIS box's sticker password. You no longer have a backup: your photos are on this box only. Add a second Keephaven and pair it to protect them again."
+      say done true "This is now your main Keephaven. All of your photos and files are here, and every app - including Photos - now uses THIS box's password. You no longer have a backup: your photos are on this box only. Add a second Keephaven and pair it to protect them again."
     else
-      say done-check-password true "This is now your main Keephaven and all of your photos and files are here. One thing about signing in: your photo library came from keephaven-''${PEER:-your other box}, and it kept that box's sign-in. So for Photos, use the password printed on THAT box's sticker. Everything else - Movies, Music, Books and file sharing - uses this box's own sticker password as usual. Nothing is missing; it is only that one sign-in travelled with the library. If you no longer have that sticker, email support@keephaven.co and we can reset it for you. You no longer have a backup: your photos are on this box only. Add a second Keephaven and pair it to protect them again."
+      say done-check-password true "This is now your main Keephaven and all of your photos and files are here. One thing about signing in: your photo library came from keephaven-''${PEER:-your other box}, and it kept that box's sign-in. So for Photos, use the password you used on THAT box. Everything else - Movies, Music, Books and file sharing - uses this box's own password as usual. Nothing is missing; it is only that one sign-in travelled with the library. If you don't know that password any more, email support@keephaven.co and we can reset it for you. You no longer have a backup: your photos are on this box only. Add a second Keephaven and pair it to protect them again."
     fi
     exit 0
   '';

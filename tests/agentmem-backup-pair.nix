@@ -20,7 +20,7 @@
 # WHAT IT DOES NOT PROVE: real hardware, a real tailnet (headscale stands in for Tailscale's
 # coordination server), the Settings pages that drive pairing and promote (their wrappers
 # are what run here), a reboot, or the Pi build (this is the PC build: same modules, x86-64).
-{ pkgs, productModules }:
+{ pkgs, productModules, switchable ? false }:
 let
   tls-cert = pkgs.runCommand "headscale-test-cert" { buildInputs = [ pkgs.openssl ]; } ''
     openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes -out cert.pem -keyout key.pem \
@@ -40,6 +40,8 @@ let
       keephaven.platform = "pc";
       keephaven.edition = "agent-memory";
       keephaven.profile = "dev";
+      # switchable = the Home box's owner switch (agentmem-switch-pair), on the same pair.
+      keephaven.agentMemory.switchable = switchable;
       # Two boxes in one test: the driver names machines by hostname, and base.nix gives
       # every box the same one.
       networking.hostName = lib.mkForce name;
@@ -54,7 +56,7 @@ let
   };
 in
 pkgs.testers.runNixOSTest {
-  name = "agentmem-backup-pair";
+  name = if switchable then "agentmem-switch-pair" else "agentmem-backup-pair";
 
   nodes = {
     boxa = box "boxa";
@@ -92,8 +94,11 @@ pkgs.testers.runNixOSTest {
     let
       w = n: nodes.${n}.cloudunit.wrappers;
       admin = n: nodes.${n}.keephaven.agentMemory.adminWrapper;
+      set = n: nodes.${n}.keephaven.agentMemory.setWrapper;
     in ''
     import json
+
+    SW = ${if switchable then "True" else "False"}
 
     D = "/var/lib/cloudunit"
 
@@ -103,6 +108,8 @@ pkgs.testers.runNixOSTest {
     start_all()
     headscale.wait_for_unit("headscale")
     headscale.wait_for_open_port(443)
+    # The CLI talks to headscale's own socket, which can lag the open port on a busy host.
+    headscale.wait_until_succeeds("headscale users list", timeout=120)
     headscale.succeed("headscale users create keephaven")
     authkey = headscale.succeed("headscale preauthkeys -u 1 create --reusable").strip().splitlines()[-1]
 
@@ -117,6 +124,16 @@ pkgs.testers.runNixOSTest {
         out = boxb.succeed("curl -s -X POST -H 'Content-Type: application/json' -d '{\"role\":\"backup\"}' http://localhost/finish")
         assert json.loads(out).get("ok") is True, out
         boxb.wait_until_succeeds("test -f " + D + "/.backup-mode", timeout=120)
+        if SW:
+            # Off until the owner turns it on: the unit's condition is the reason, nothing listens.
+            assert boxa.succeed("${set "boxa"} status").strip() == "off"
+            boxa.succeed("systemctl start keephaven-agent-memory.service || true")
+            assert boxa.succeed("systemctl show -p ConditionResult --value keephaven-agent-memory").strip() == "no"
+            code = boxa.succeed("curl -s -o /dev/null -w '%{http_code}' http://localhost:8790/v1/health || true").strip()
+            assert code == "000", code
+            assert boxa.succeed("${set "boxa"} on").strip() == "ok"
+            assert boxa.succeed("${set "boxa"} status").strip() == "on"
+            boxa.succeed("test -f /var/lib/cloudunit/apps/agent-memory.on")
         boxa.wait_for_unit("keephaven-agent-memory.service")
         boxa.wait_for_open_port(8790)
 
@@ -126,6 +143,10 @@ pkgs.testers.runNixOSTest {
         assert boxb.succeed("systemctl is-active keephaven-agent-memory || true").strip() == "inactive"
         code = boxb.succeed("curl -s -o /dev/null -w '%{http_code}' http://localhost:8790/v1/health || true").strip()
         assert code == "000", code
+        if SW:
+            assert boxb.succeed("${set "boxb"} status").strip() == "backup-mode"
+            boxb.fail("${set "boxb"} on")
+            boxb.succeed("test ! -e /var/lib/cloudunit/apps/agent-memory.on")
 
     with subtest("an agent on boxa writes a file and a journal entry"):
         token = boxa.succeed("${admin "boxa"} add scout").strip()
@@ -133,6 +154,15 @@ pkgs.testers.runNixOSTest {
         H = "-H 'Authorization: Bearer " + token + "'"
         boxa.succeed("curl -sf -X PUT " + H + " --data-binary 'kept across boxes' http://localhost:8790/v1/files/notes/pair.md")
         boxa.succeed("curl -sf -X POST " + H + " -d '{\"did\":\"wrote before the backup\"}' http://localhost:8790/v1/journal")
+        if SW:
+            # Off keeps every agent's files and token; on again, the same agent works.
+            assert boxa.succeed("${set "boxa"} off").strip() == "ok"
+            assert boxa.succeed("systemctl is-active keephaven-agent-memory || true").strip() == "inactive"
+            boxa.succeed("test ! -e /var/lib/cloudunit/apps/agent-memory.on")
+            boxa.succeed("test -f " + D + "/agent-memory/agents/scout/notes/pair.md")
+            assert boxa.succeed("${set "boxa"} on").strip() == "ok"
+            body = boxa.succeed("curl -sf " + H + " http://localhost:8790/v1/files/notes/pair.md")
+            assert body == "kept across boxes", body
 
     with subtest("both boxes join the private tailnet"):
         for m, n in ((boxa, "boxa"), (boxb, "boxb")):
@@ -157,6 +187,8 @@ pkgs.testers.runNixOSTest {
         boxb.succeed("test -f " + L + "/agent-memory/agents/scout/notes/pair.md")
         boxb.succeed("test -f " + L + "/agent-memory/agents.json")
         boxb.succeed("test -f " + L + "/apps-off.list")
+        if SW:
+            assert "agent-memory.on" in boxb.succeed("cat " + L + "/apps-off.list").split(), "switch not in apps-off.list"
         assert boxb.succeed("find " + L + "/dump -name 'immich-*' | wc -l").strip() == "0"
 
     with subtest("boxb's newest backup is the time apps-off.list arrived"):
@@ -171,6 +203,10 @@ pkgs.testers.runNixOSTest {
         assert "Everything from your backup is here" in ps.get("message", ""), ps
         boxb.succeed("test -f " + D + "/replication/.promoted")
         boxb.succeed("test ! -f " + D + "/.backup-mode")
+        if SW:
+            # The takeover keeps the owner's choice: on there, on here.
+            boxb.succeed("test -f /var/lib/cloudunit/apps/agent-memory.on")
+            assert boxb.succeed("${set "boxb"} status").strip() == "on"
         owner = boxb.succeed("stat -c %U " + D + "/agent-memory/agents/scout/notes/pair.md").strip()
         assert owner == "kh-memory", owner
         boxb.wait_for_unit("keephaven-agent-memory.service")
@@ -189,5 +225,7 @@ pkgs.testers.runNixOSTest {
         boxb.succeed("test ! -e " + D + "/agent-memory/agents")
         boxb.succeed("test ! -e " + D + "/agent-memory/agents.json")
         assert boxb.succeed("systemctl is-active keephaven-agent-memory || true").strip() != "active"
+        if SW:
+            boxb.succeed("test ! -e /var/lib/cloudunit/apps/agent-memory.on")
   '';
 }

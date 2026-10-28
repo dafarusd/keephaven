@@ -25,6 +25,58 @@ let
   memDir = "${dataDir}/agent-memory";
   user = "kh-memory";
 
+  marker = "${config.keephaven.appsDir}/agent-memory.on";
+
+  # The ONE privileged entry point for the owner's switch (Settings, via sudo -n as
+  # cloudunit-web). Untrusted argument, exact match. The marker is written or removed
+  # FIRST, so a racing start is condition-blocked; then it waits until the service is
+  # really up (health answers) or really down, and says so. Off never deletes an
+  # agent's folder or token: on again, the same agents work.
+  setScript = pkgs.writeShellScriptBin "keephaven-agent-memory-set" ''
+    set -u
+    SYSCTL=${pkgs.systemd}/bin/systemctl
+    MARK=${marker}
+    case "''${1-}" in
+      (status)
+        if [ -e ${dataDir}/.backup-mode ]; then echo backup-mode
+        elif [ -e "$MARK" ]; then echo on
+        else echo off; fi
+        exit 0 ;;
+      (on|off) ;;
+      (*) echo "usage: keephaven-agent-memory-set status|on|off" >&2; exit 2 ;;
+    esac
+    if [ -e ${dataDir}/.backup-mode ]; then
+      echo "this Keephaven is a backup box; agent memory stays off until it takes over" >&2; exit 3
+    fi
+    ${pkgs.coreutils}/bin/mkdir -p ${config.keephaven.appsDir}
+    if [ "$1" = on ]; then
+      ${pkgs.coreutils}/bin/touch "$MARK"
+      ${pkgs.coreutils}/bin/chmod 644 "$MARK"
+      $SYSCTL start keephaven-agent-memory.service || true
+      i=0
+      while [ "$i" -lt 30 ]; do
+        code="$(${pkgs.curl}/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${toString cfg.port}/v1/health 2>/dev/null || true)"
+        if [ "$code" = 200 ]; then
+          ${pkgs.util-linux}/bin/logger -t keephaven-agent-memory "owner switched agent memory on"
+          echo ok; exit 0
+        fi
+        ${pkgs.coreutils}/bin/sleep 2; i=$((i + 1))
+      done
+      echo "agent memory did not start" >&2; exit 4
+    fi
+    ${pkgs.coreutils}/bin/rm -f "$MARK"
+    $SYSCTL stop keephaven-agent-memory.service || true
+    i=0
+    while [ "$i" -lt 15 ]; do
+      if ! $SYSCTL is-active --quiet keephaven-agent-memory.service; then
+        ${pkgs.util-linux}/bin/logger -t keephaven-agent-memory "owner switched agent memory off"
+        echo ok; exit 0
+      fi
+      ${pkgs.coreutils}/bin/sleep 2; i=$((i + 1))
+    done
+    echo "agent memory did not stop" >&2; exit 4
+  '';
+
   cli = pkgs.writeShellScriptBin "agent-memory" ''
     exec ${pkgs.python3}/bin/python3 ${./agent-memory.py} "$@"
   '';
@@ -91,6 +143,21 @@ in
         Agent memory on :8790. Off by default; existing images are unchanged when off.
       '';
     };
+    switchable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        The owner turns agent memory on and off in Settings. It runs only while the marker
+        ''${config.keephaven.appsDir}/agent-memory.on exists, so a fresh, reset or updated box
+        comes up off. False = always on when enabled, exactly as before.
+      '';
+    };
+    setWrapper = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+      description = "Store path of the on/off wrapper, for Settings' sudo grant.";
+    };
     port = lib.mkOption {
       type = lib.types.port;
       default = 8790;
@@ -106,6 +173,7 @@ in
 
   config = lib.mkMerge [
     { keephaven.agentMemory.adminWrapper = "${admin}/bin/keephaven-agent-memory-admin"; }
+    { keephaven.agentMemory.setWrapper = "${setScript}/bin/keephaven-agent-memory-set"; }
     (lib.mkIf cfg.enable {
       users.users.${user} = {
         isSystemUser = true;
@@ -128,7 +196,10 @@ in
         unitConfig.RequiresMountsFor = dataDir;
         # Off on a backup box, like the apps: nothing listens on the port there. The replicated
         # copy of the main box's agents still lands under replication/landing (2026-10-24).
-        unitConfig.ConditionPathExists = "!${dataDir}/.backup-mode";
+        # Switchable (Home): also only while the owner has it on; systemd ANDs the two.
+        unitConfig.ConditionPathExists = if cfg.switchable
+          then [ "!${dataDir}/.backup-mode" marker ]
+          else "!${dataDir}/.backup-mode";
         serviceConfig = {
           Type = "simple";
           User = user;

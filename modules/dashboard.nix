@@ -74,7 +74,7 @@ let
     PICKABLE = ${builtins.toJSON config.keephaven.pickableApps}
     def apps_off():
         try:
-            return [a for a in PICKABLE if os.path.exists(os.path.join(APPS_DIR, a + ".off"))]
+            return [a for a in PICKABLE if os.path.exists(os.path.join(APPS_DIR, a + ".off"))]${lib.optionalString (config.keephaven.agentMemory.enable && config.keephaven.agentMemory.switchable) " + ([] if os.path.exists(os.path.join(APPS_DIR, \"agent-memory.on\")) else [\"agent-memory\"])"}
         except Exception:
             return []
     PAGE = """<!DOCTYPE html>

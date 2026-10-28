@@ -58,6 +58,14 @@ let
       (builtins.readFile ./agent-memory-settings.py)) + "\n\n");
   agentsPost = lib.optionalString memOn
     "elif self.path == \"/agents\":\n            agents_post(self, data)\n\n        ";
+  # Settings > Agent memory, the owner's on/off switch (Home). Spliced after the Agents code,
+  # which it wraps; every splice renders to "" unless switchable, so other images are unchanged.
+  memSwitch = memOn && config.keephaven.agentMemory.switchable;
+  switchFuncs = lib.optionalString memSwitch (builtins.replaceStrings [ "@SET@" ]
+    [ config.keephaven.agentMemory.setWrapper ]
+    (withNeedles "agent-memory-switch.py" [ "@SET@" ] (builtins.readFile ./agent-memory-switch.py)) + "\n\n");
+  memoryPost = lib.optionalString memSwitch
+    "elif self.path == \"/agent-memory\":\n            memory_post(self, data)\n\n        ";
 
   applyApConfig = pkgs.writeShellScriptBin "cloudunit-apply-ap-config" ''
     set -euo pipefail
@@ -124,7 +132,8 @@ let
       builtins.replaceStrings
         [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n"
           "freshrss tailscale replication ssh; do" ]
-        [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n$SYSTEMCTL stop keephaven-agent-memory 2>/dev/null || true\n"
+        [ ("$SYSTEMCTL stop tailscaled 2>/dev/null || true\n$SYSTEMCTL stop keephaven-agent-memory 2>/dev/null || true\n"
+            + lib.optionalString memSwitch "rm -f ${config.keephaven.appsDir}/agent-memory.on\n")
           "freshrss tailscale replication ssh agent-memory; do" ]
         (withNeedles "factory-reset.sh" [ "$SYSTEMCTL stop tailscaled 2>/dev/null || true\n" "freshrss tailscale replication ssh; do" ]
           (builtins.readFile ./factory-reset.sh))
@@ -159,7 +168,7 @@ let
     for a in ${lib.concatStringsSep " " config.keephaven.pickableApps}; do
       if [ -e ${config.keephaven.appsDir}/$a.off ]; then off="$off $a"; fi
     done
-    echo "apps off (owner's choice):''${off:- none}"
+    echo "apps off (owner's choice):''${off:- none}"${lib.optionalString memSwitch "\necho \"agent memory: $([ -e ${config.keephaven.appsDir}/agent-memory.on ] && echo on || echo off)\""}
     # Memory, box-wide and per container. Feeds the app picker's "will it fit"
     # numbers (P3, measured on the test unit) and tells support whether a box is
     # short of memory. Sizes only -- no personal data.
@@ -776,17 +785,17 @@ let
         return ("<div class=\"card\"><h2>Photos sign-in</h2>"
                 "<p class=\"sub\">Your photo library was restored from <b>" + srch + "</b>, and "
                 "it kept that box's sign-in. So when you open <b>Photos</b>, use the password "
-                "printed on <b>" + srch + "'s</b> sticker &mdash; not this box's. Everything "
+                "you used on <b>" + srch + "</b> &mdash; not this box's. Everything "
                 "else (Movies, Music, Books, file sharing) uses this box's own password as "
                 "usual.</p>"
                 "<p class=\"sub\">You can fix that here, once. Enter the password you use for "
                 "Photos now, and it will be changed to ${pwOwnKind} like "
                 "everything else. This message then disappears on its own.</p>"
                 "<form method=\"POST\" action=\"/photos-signin-fix\">"
-                "<label>The password you currently use for Photos (from " + srch + "'s sticker)</label>"
+                "<label>The password you currently use for Photos (the one from " + srch + ")</label>"
                 "<div class=\"pwrow\"><input name=\"oldpw\" type=\"password\" autocomplete=\"off\">"
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
-                "<p class=\"sub\">If you no longer have that sticker, email "
+                "<p class=\"sub\">If you don't know that password any more, email "
                 "support@keephaven.co and we can reset it for you.</p>"
                 "<button type=\"submit\">Use this box's password for Photos too</button>"
                 "</form></div>")
@@ -970,7 +979,7 @@ let
                 "<button type=\"button\" class=\"pweye\" aria-label=\"Show or hide password\"><svg class=\"eye-on\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg><svg class=\"eye-off\" style=\"display:none\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\"/><path d=\"M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg></button></div>"
                 "<button type=\"submit\">Save apps</button></form></div></details>")
 
-    ${agentsFuncs}def page(msg="", host=None):
+    ${agentsFuncs}${switchFuncs}def page(msg="", host=None):
         note = ("<div class='note'>" + html.escape(msg) + "</div>") if msg else ""
         apps_card_html = apps_card()
         support = support_status_line()
@@ -1070,7 +1079,7 @@ let
       {note}
       {update_card}
       {photos_card}
-      {apps_card}${lib.optionalString memOn "{agents_card}"}
+      {apps_card}${lib.optionalString memSwitch "{memory_card}"}${lib.optionalString memOn "{agents_card}"}
       <details class="section" open>
         <summary>Network</summary>
         <div class="card">
@@ -1213,7 +1222,7 @@ let
         }});
       }});
       </script>
-    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html,${lib.optionalString memOn " agents_card=agents_card(),"} home=html.escape(home))
+    </body></html>""".format(note=note, support=html.escape(support), remote_card=remote_card, update_card=update_card_html, backup_section=backup_section, photos_card=photos_card, apps_card=apps_card_html,${lib.optionalString memSwitch " memory_card=memory_card(),"}${lib.optionalString memOn " agents_card=agents_card(),"} home=html.escape(home))
 
     def run(cmd, timeout=None):
         try:
@@ -1713,7 +1722,7 @@ let
                     return
                 self._msg("Support access is now on for " + hours + " hours. It will turn off by itself when the time is up.")
 
-            ${agentsPost}elif self.path == "/apps":
+            ${agentsPost}${memoryPost}elif self.path == "/apps":
                 verdict = auth_check(data)
                 if verdict != "ok":
                     self._msg(auth_deny_msg(verdict, "Your apps were NOT changed."))
@@ -2046,6 +2055,8 @@ in
       { command = wrappers.appSet; options = [ "NOPASSWD" ]; }
     ] ++ lib.optionals memOn [
       { command = config.keephaven.agentMemory.adminWrapper; options = [ "NOPASSWD" ]; }
+    ] ++ lib.optionals memSwitch [
+      { command = config.keephaven.agentMemory.setWrapper; options = [ "NOPASSWD" ]; }
     ] ++ lib.optionals config.keephaven.replication.enable [
       { command = wrappers.replicaSyncNow; options = [ "NOPASSWD" ]; }
       { command = wrappers.replicaTargetStatus; options = [ "NOPASSWD" ]; }

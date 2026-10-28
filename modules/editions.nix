@@ -100,7 +100,10 @@ in
   config.keephaven.appsDir = "/var/lib/cloudunit/apps";
 
   config.keephaven.activeApps = editions.${config.keephaven.edition};
-  config.keephaven.agentMemory.enable = lib.mkIf (config.keephaven.edition == "agent-memory") true;
+  config.keephaven.agentMemory.enable = lib.mkIf (builtins.elem config.keephaven.edition [ "agent-memory" "entertainment" ]) true;
+  # Home carries agent memory switched OFF; the owner turns it on in Settings (2026-10-28).
+  # Photos has none. The Agent Memory edition stays always on (switchable = false).
+  config.keephaven.agentMemory.switchable = lib.mkIf (config.keephaven.edition == "entertainment") true;
   # Agent memory (modules/agent-memory.nix) is not an edition app: it rides the same
   # backup when it is switched on, last in the list, matching replication-sender.nix.
   config.keephaven.activeBackupPaths =

@@ -334,7 +334,8 @@ let
       if [ -e "${config.keephaven.appsDir}/$a.off" ]; then
         echo "$a" >> ${dataDir}/apps-off.list.tmp
       fi
-    done
+    done${lib.optionalString (config.keephaven.agentMemory.enable && config.keephaven.agentMemory.switchable)
+      "\n# Agent memory's switch rides the same file, by its marker's own name.\nif [ -e ${config.keephaven.appsDir}/agent-memory.on ]; then\n  echo agent-memory.on >> ${dataDir}/apps-off.list.tmp\nfi"}
     ${pkgs.coreutils}/bin/mv -f ${dataDir}/apps-off.list.tmp ${dataDir}/apps-off.list
 
     FAILED=""
