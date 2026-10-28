@@ -51,20 +51,20 @@ More: https://keephaven.co/backup
 
 ## Download
 
-Current release: **2026.10.29** — the same version the update server hands out to every box. What changed in each release: https://keephaven.co/releases
+Current release: **2026.10.30** — the same version the update server hands out to every box. What changed in each release: https://keephaven.co/releases
 
 Step-by-step setup lives on the site: https://keephaven.co/download#setup
 
-- File: [`keephaven-2026.10.29.img.zst`](https://updates.keephaven.co/download/keephaven-2026.10.29.img.zst)
-- Size: 6,265,471,846 bytes compressed, 35,445,014,528 bytes unpacked
-- SHA-256: `c60961737dc21ace56f89377369db4039b81333cef830c5cb990f97ea101dd13`
+- File: [`keephaven-2026.10.30.img.zst`](https://updates.keephaven.co/download/keephaven-2026.10.30.img.zst)
+- Size: 6,266,235,087 bytes compressed, 35,445,014,528 bytes unpacked
+- SHA-256: `cbcc8c29d22f3ee469539e8c341aee30fe4f778f4771ac53bc4043963ff37960`
 
 There's also a Photos edition that runs only Immich. Its image is on the same download page.
 
 Check it before you flash:
 
 ```
-sha256sum keephaven-2026.10.29.img.zst
+sha256sum keephaven-2026.10.30.img.zst
 ```
 
 ## On a Windows PC instead of a box
@@ -80,6 +80,8 @@ It's the same licence and the same source as the boxes. The drive edition's own 
 
 **Keephaven Agent Memory** is Keephaven with every app taken out and one thing switched on: a place where your AI agents keep what they remember, on hardware you own. It runs on a Pi 5 with an NVMe drive, or on a USB SSD on a Windows PC with the same drive setup as Photos SSD. Setup, Settings, signed updates, remote access and box-to-box backup are all still there.
 
+Keephaven Home carries it too, switched off. Turn it on in Settings → Agent memory; turn it off again and every agent's files stay.
+
 - Each agent you add in Settings → Agents gets its own folder with a size limit, and a key shown once. The box keeps only a hash of it.
 - An agent can't see another agent's folder. Its journal is append-only — it can add, never edit or delete.
 - Revoke an agent and its key stops working at once. Its files stay until you delete them.
@@ -93,7 +95,7 @@ nix run github:dafarusd/keephaven#agent-memory -- serve --data ./mem --dev-token
 
 Or boot the whole Agent Memory SSD image in a VM under QEMU, no hardware at all: https://gist.github.com/dafarusd/43a6bfad80e7b4db4e9897133262aee8
 
-Tested: 22 API tests and a two-VM NixOS test. The Pi edition passed its release checks on one Pi 5, the SSD edition on a real USB drive on a Windows PC. Backup ran from a real Pi 5 (pre-release build) to a PC build in a VM over Tailscale — not yet between two real boxes.
+Tested: 22 API tests and two two-VM NixOS tests (backup and takeover; the Home switch carried through a takeover). On one Pi 5, a Home box updated to 2026.10.30, turned agent memory on and off and kept its agents through restarts. The Agent Memory editions' first release passed its checks on one Pi 5 and on a real USB drive on a Windows PC. Backup ran from a real Pi 5 (pre-release build) to a PC build in a VM over Tailscale — not yet between two real boxes.
 
 Downloads and checksums: https://keephaven.co/agent-memory
 
@@ -117,7 +119,7 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 Then, with your SSD's name in place of `sdX`:
 
 ```
-zstd -d keephaven-2026.10.29.img.zst -o keephaven.img
+zstd -d keephaven-2026.10.30.img.zst -o keephaven.img
 sudo blkdiscard -f /dev/sdX
 sudo dd if=keephaven.img of=/dev/sdX bs=4M status=progress conv=fsync
 sync
@@ -158,6 +160,14 @@ nix build .#packages.aarch64-linux.prod --accept-flake-config -o result-prod
 ```
 
 The image lands in `result-prod/sd-image/`. `--accept-flake-config` lets Nix use the `nixos-raspberrypi` binary cache, so the Pi kernel downloads instead of compiling.
+
+To confirm this source is what built the download:
+
+```
+nix eval --raw .#packages.aarch64-linux.prod.outPath --accept-flake-config
+```
+
+At this commit it prints `/nix/store/xjakrfafl5bayz34jpi7v6hkv5hs6jb9-nixos-image-rpi5-kernel.img.zst`, the same store path the published image was built as. Same source, same inputs. Your own build's bytes may still differ from the download, since that isn't checked bit for bit.
 
 To build the drive edition instead, on an x86-64 Linux machine:
 
